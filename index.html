@@ -1,15 +1,231 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Agrinho 2026 - Agro forte, futuro sustentável</title>
-    <link rel="stylesheet" href="style.css">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Agro Forte - Futuro Sustentável</title>
+  <link rel="stylesheet" href="/style.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='50' fill='%232d8c45'/><path d='M50 15 Q65 30 65 50 Q65 70 50 85 Q35 70 35 50 Q35 30 50 15Z' fill='%234db86a'/><line x1='50' y1='15' x2='50' y2='85' stroke='%23ffffff' stroke-width='3'/></svg>" />
 </head>
 <body>
-    <canvas id="gameCanvas" width="800" height="500"></canvas>
-    <div id="ui-overlay"></div>
-    <div id="loading" style="display:none;">Carregando...</div>
-    <script src="game.js"></script>
+
+<div id="loading-screen">
+  <div class="loading-logo">
+    <canvas id="logo-canvas" width="120" height="120"></canvas>
+    <h1>AGRO FORTE</h1>
+    <p class="loading-subtitle">Agro forte, futuro sustentável</p>
+    <div class="loading-badge">🌾 AGRINHO 2026 &nbsp;·&nbsp; Subcategoria 3 &nbsp;·&nbsp; HTML/CSS/JS</div>
+  </div>
+  <div class="loading-bar-container">
+    <div class="loading-bar" id="loading-bar"></div>
+  </div>
+  <p class="loading-percent" id="loading-percent">0%</p>
+  <p class="loading-msg" id="loading-msg">Inicializando motor gráfico...</p>
+  <p class="loading-tips" id="loading-tips">Dica: Use WASD para mover e o mouse para olhar ao redor</p>
+</div>
+
+<div id="trailer-screen" class="hidden">
+  <canvas id="trailer-canvas"></canvas>
+  <button class="skip-btn" id="skip-trailer-btn">⏭ Pular</button>
+</div>
+
+<div id="main-menu" class="hidden">
+  <div class="menu-bg-anim" id="menu-bg-anim"></div>
+  <div class="menu-overlay"></div>
+  <div class="menu-content">
+    <div class="menu-logo">
+      <canvas id="menu-logo-canvas" width="80" height="80"></canvas>
+      <h1 class="menu-title">AGRO FORTE</h1>
+      <p class="menu-tagline">Agro forte, futuro sustentável</p>
+    </div>
+    <div class="menu-buttons">
+      <button class="menu-btn primary" id="btn-career">📋 Modo Carreira</button>
+      <button class="menu-btn" id="btn-plantation">🌾 Modo Plantação</button>
+      <button class="menu-btn" id="btn-characters">👨‍🌾 Personagens</button>
+      <button class="menu-btn" id="btn-achievements">🏆 Conquistas</button>
+      <button class="menu-btn" id="btn-watch-trailer">🎬 Assistir Trailer</button>
+      <button class="menu-btn" id="btn-settings">⚙️ Configurações</button>
+    </div>
+    <div class="menu-version">v1.0 | Agrinho 2026 | Subcategoria 3</div>
+  </div>
+  <div class="menu-char-showcase" id="menu-char-showcase"></div>
+</div>
+
+<div id="characters-screen" class="hidden">
+  <button class="back-btn" id="back-from-chars">← Voltar</button>
+  <h2 class="screen-title">👨‍🌾 Personagens</h2>
+  <div class="chars-grid" id="chars-grid"></div>
+</div>
+
+<div id="career-screen" class="hidden">
+  <button class="back-btn" id="back-from-career">← Voltar</button>
+  <h2 class="screen-title">📋 Modo Carreira</h2>
+  <div class="missions-list" id="missions-list"></div>
+</div>
+
+<div id="cutscene-screen" class="hidden">
+  <canvas id="cutscene-canvas"></canvas>
+  <div class="cutscene-dialogue" id="cutscene-dialogue">
+    <div class="dialogue-portrait" id="dialogue-portrait-canvas-container">
+      <canvas id="dialogue-portrait-canvas" width="100" height="120"></canvas>
+    </div>
+    <div class="dialogue-text-area">
+      <div class="dialogue-speaker" id="dialogue-speaker"></div>
+      <div class="dialogue-text" id="dialogue-text"></div>
+    </div>
+    <button class="dialogue-next" id="dialogue-next">▶</button>
+  </div>
+  <button class="skip-cutscene-btn" id="skip-cutscene-btn">Pular →</button>
+</div>
+
+<div id="game-screen" class="hidden">
+  <canvas id="game-canvas"></canvas>
+  <div class="hud" id="hud">
+    <div class="hud-top">
+      <div class="hud-mission" id="hud-mission">Missão 1</div>
+      <div class="hud-timer" id="hud-timer"></div>
+      <div class="hud-objective" id="hud-objective"></div>
+    </div>
+    <div class="hud-bottom">
+      <div class="hud-item" id="hud-item">🌱 Sem item</div>
+      <div class="hud-progress-wrap">
+        <div class="hud-progress-bar" id="hud-progress-bar"></div>
+        <span class="hud-progress-text" id="hud-progress-text">0/1</span>
+      </div>
+      <div class="hud-controls">WASD · E=Interagir · Shift=Correr · Ctrl=Agachar · ESC=Pausa</div>
+    </div>
+    <div class="crosshair">+</div>
+    <div class="boundary-msg hidden" id="boundary-msg"></div>
+    <div class="interact-hint hidden" id="interact-hint">Pressione <kbd>E</kbd> para interagir</div>
+    <div class="vehicle-hint hidden" id="vehicle-hint">Pressione <kbd>E</kbd> para entrar no veículo</div>
+  </div>
+  <div id="minimap-wrap">
+    <canvas id="minimap" width="120" height="120"></canvas>
+    <div class="minimap-label">Minimapa</div>
+  </div>
+</div>
+
+<div id="plantation-screen" class="hidden">
+  <canvas id="plantation-canvas"></canvas>
+  <div class="plantation-hud">
+    <span id="plnt-money">💰 R$ 500</span>
+    <span id="plnt-day">📅 Dia 1</span>
+    <span id="plnt-tool">🪚 Enxada</span>
+    <button id="plnt-shop-btn">🏪 Loja</button>
+    <button id="plnt-next-day-btn">⏭ Próximo Dia</button>
+    <button id="plnt-back-btn">← Menu</button>
+  </div>
+  <div class="plnt-tooltip hidden" id="plnt-tooltip"></div>
+  <div class="plantation-shop hidden" id="plantation-shop">
+    <div class="shop-inner">
+      <h3>🏪 Loja da Cidade</h3>
+      <div id="shop-items"></div>
+      <button id="close-shop-btn">✕ Fechar</button>
+    </div>
+  </div>
+  <div class="plnt-toolbar" id="plnt-toolbar"></div>
+</div>
+
+<div id="achievements-screen" class="hidden">
+  <button class="back-btn" id="back-from-achievements">← Voltar</button>
+  <h2 class="screen-title">🏆 Conquistas</h2>
+  <div class="achievements-grid" id="achievements-grid"></div>
+</div>
+
+<div id="settings-screen" class="hidden">
+  <button class="back-btn" id="back-from-settings">← Voltar</button>
+  <h2 class="screen-title">⚙️ Configurações</h2>
+  <div class="settings-content">
+    <div class="setting-row">
+      <label>🎵 Volume da Música</label>
+      <input type="range" id="setting-music" min="0" max="100" value="70" />
+      <span id="val-music">70%</span>
+    </div>
+    <div class="setting-row">
+      <label>🔊 Volume dos Efeitos</label>
+      <input type="range" id="setting-sfx" min="0" max="100" value="80" />
+      <span id="val-sfx">80%</span>
+    </div>
+    <div class="setting-row">
+      <label>🖥️ Qualidade Gráfica</label>
+      <select id="setting-quality">
+        <option value="low">Baixa</option>
+        <option value="medium" selected>Média</option>
+        <option value="high">Alta</option>
+      </select>
+    </div>
+    <div class="setting-row">
+      <label>🖱️ Sensibilidade do Mouse</label>
+      <input type="range" id="setting-mouse" min="1" max="10" value="5" />
+      <span id="val-mouse">5</span>
+    </div>
+    <div class="setting-row">
+      <h3>🏆 Conquistas</h3>
+      <div id="achievements-mini"></div>
+    </div>
+  </div>
+</div>
+
+<div id="pause-menu" class="hidden">
+  <div class="pause-overlay">
+    <h2>⏸ Pausado</h2>
+    <button class="menu-btn" id="btn-resume">▶ Continuar</button>
+    <button class="menu-btn" id="btn-pause-settings">⚙️ Configurações</button>
+    <button class="menu-btn" id="btn-quit-game">🏠 Menu Principal</button>
+  </div>
+</div>
+
+<div id="save-dialog" class="hidden">
+  <div class="dialog-box">
+    <div class="dialog-icon">💾</div>
+    <h3>Progresso Encontrado</h3>
+    <p>Você tem uma partida salva.</p>
+    <button class="menu-btn primary" id="btn-continue-save">▶ Continuar</button>
+    <button class="menu-btn" id="btn-new-save">🔄 Novo Jogo</button>
+  </div>
+</div>
+
+<div id="achievement-notif" class="hidden">
+  <div class="ach-icon" id="ach-icon">🏆</div>
+  <div class="ach-info">
+    <div class="ach-label">Conquista Desbloqueada!</div>
+    <div class="ach-name" id="ach-name"></div>
+  </div>
+</div>
+
+<div id="plantation-unlock-notif" class="hidden">
+  🔓 Modo Plantação Desbloqueado!
+</div>
+
+<div id="mission-complete" class="hidden">
+  <div class="mc-box">
+    <div class="mc-icon">✅</div>
+    <h2 id="mc-title">Missão Completa!</h2>
+    <p id="mc-desc"></p>
+    <div id="mc-reward" class="mc-reward"></div>
+    <button class="menu-btn primary" id="btn-next-mission">Próxima Missão →</button>
+    <button class="menu-btn" id="btn-mission-menu">Menu Principal</button>
+  </div>
+</div>
+
+<div id="final-trailer" class="hidden">
+  <div class="final-content">
+    <h1 class="final-title">🌾 CAMPANHA CONCLUÍDA!</h1>
+    <p class="final-sub">Você transformou a fazenda e garantiu um futuro sustentável para a região.</p>
+    <div class="final-badges" id="final-badges"></div>
+    <p class="final-coming">✨ Mais em breve...</p>
+    <div class="final-actions">
+      <p>Deseja reiniciar a campanha?</p>
+      <button class="menu-btn primary" id="btn-restart-campaign">🔄 Reiniciar Campanha</button>
+      <button class="menu-btn" id="btn-final-menu">🏠 Menu Principal</button>
+    </div>
+  </div>
+</div>
+
+<script src="/characters.js"></script>
+<script src="/engine.js"></script>
+<script src="/plantation.js"></script>
+<script src="/trailer.js"></script>
+<script src="/game.js"></script>
 </body>
-</html> 
+</html>
