@@ -1,17 +1,17 @@
 // ═════════════════════════════════════════════════════════════
-// AGRINHO 2026 — VERSÃO COMPLETA E CORRIGIDA
-// Agro forte, futuro sustentável
+// AGRINHO 2026 — Agro forte, futuro sustentável
+// Engine 3D + Campanha + Sandbox + Plantação
 // ═════════════════════════════════════════════════════════════
 
 // ── VARIÁVEIS DE ESTADO GLOBAL ─────────────────────────────
-let estadoTela = 0;
+let estadoTela = 0; // 0=clique, 1=aviso, 2=estudio, 3=menu, 4=jogo
 let tempoEstado = 0;
 let anguloCubo = 0;
 let menuHover = -1;
 
 // ── CAMPANHA ───────────────────────────────────────────────
 let campaignActive = false;
-let campaignState = 'levelSelect';
+let campaignState = 'levelSelect'; // levelSelect|preCutscene|gameplay|pause|win|ending
 let currentPhase = 0;
 let phasesUnlocked = [true, false, false, false, false, false];
 let csFrame = 0, csIdx = 0;
@@ -24,7 +24,7 @@ let cam1 = 0, cam2 = 0, cam2b = 0;
 
 // ── SANDBOX ────────────────────────────────────────────────
 let sandboxActive = false;
-let sbWeather = 0;
+let sbWeather = 0; // 0=dia 1=nublado 2=noite 3=tempestade
 let sbTool = 0;
 let sbWeatherTimer = 0;
 let lightningFlash = 0;
@@ -33,10 +33,10 @@ const SB_WEATHER_NAMES = ['☀ DIA CLARO', '⛅ NUBLADO', '🌙 NOITE TÁTICA', 
 
 // ── PLANTAÇÃO ──────────────────────────────────────────────
 let plantActive = false;
-let plantGrid = [];
+let plantGrid = []; // 10 cols x 6 rows
 const PLANT_COLS = 10, PLANT_ROWS = 6;
 let plantResources = { agua: 100, creditos: 100, solo: 100, sementes: 30 };
-let plantTool = 0;
+let plantTool = 0; // 0=scanner 1=arado 2=semear 3=irrigar 4=bioinsumo
 const PLANT_TOOLS = ['SCANNER', 'ARAR', 'SEMEAR', 'IRRIGAR', 'BIOINSUMO'];
 let plantMsg = '', plantMsgTimer = 0;
 let plantEfficiency = 0;
@@ -44,10 +44,14 @@ let plantCursor = { col: 0, row: 0 };
 let plantWin = false;
 
 // ── PLAYER ─────────────────────────────────────────────────
-let player = { x: 12, y: 12, angle: 0, stamina: 100, health: 100, moving: false };
+let player = { x: 3.5, y: 3.5, angle: 0, pitch: 0, stamina: 100, health: 100, running: false, crouching: false, moving: false, bobTime: 0 };
 let pointerLocked = false;
 let nativeMovX = 0, nativeMovY = 0;
 let keys = {};
+let zBuf = new Float32Array(800);
+let cameraX2 = 0, cameraY2 = 0;
+const TAMANHO_CELULA = 28;
+let windParts = [];
 let stepTimer = 0;
 
 // ── OBJETIVOS ──────────────────────────────────────────────
@@ -64,19 +68,44 @@ let activeNPCs = [], spots = [];
 // ── CANVAS ─────────────────────────────────────────────────
 let cnvElt = null;
 
-// ── ÁUDIO (DESATIVADO PARA GITHUB PAGES) ───────────────────
-let audioReady = true;
+// ── ÁUDIO ──────────────────────────────────────────────────
+let audioReady = false;
 let windNoise = null;
 let windAmp = 0;
+let stepEnv = null, stepOsc = null;
+let pickupEnv = null, pickupOsc = null;
+let dialogEnv = null, dialogOsc = null;
 
-// ── MÚSICA TRAILER (SIMPLIFICADA) ─────────────────────────
+// ── MÚSICA TRAILER ─────────────────────────────────────────
 let musicInited = false;
 let musicAtiva = false;
 let musicFrame = 0;
+let acordeAtual = 0;
+let melodiaIdx = 0;
+let proxNota = 0, proxAcorde = 0, proxKick = 0;
+let padOscs = [];
+let bassOsc = null;
+let melodyEnv = null, melodyOsc = null;
+let hihatEnv = null, hihatOsc = null;
+let kickEnv = null, kickOsc = null;
+
+const ACORDES = [
+  [261.63, 329.63, 392.00],
+  [293.66, 369.99, 440.00],
+  [349.23, 440.00, 523.25],
+  [329.63, 415.30, 493.88],
+  [261.63, 329.63, 392.00],
+  [293.66, 369.99, 440.00],
+  [349.23, 440.00, 523.25],
+  [392.00, 493.88, 587.33]
+];
+const BAIXO_FREQS = [130.81, 146.83, 174.61, 164.81, 130.81, 146.83, 174.61, 196.00];
+const ACORDE_DUR = 480;
+const MELODIA_FREQS = [329.63, 349.23, 392.00, 440.00, 523.25, 493.88, 440.00, 392.00, 349.23, 329.63, 0, 329.63, 392.00, 440.00, 523.25, 587.33, 523.25, 440.00, 392.00, 349.23, 329.63, 0];
+const MELODIA_DUR = 60;
 
 // Partículas de cena
 let nuvens = [], passaros = [], graos = [], bovinos = [], poeira = [], brasas = [], menuStars = [];
-let windParts = [];
 
 // Oscilador de fundo
 let osciladorFundo = null;
@@ -94,238 +123,785 @@ const PROBLEMAS = [
 ];
 
 // ═════════════════════════════════════════════════════════════
-// PERSONAGENS
+// PERSONAGENS — 10 chars com esquemas de cores detalhados
 // ═════════════════════════════════════════════════════════════
 const CHARS = [
-  { name: 'SEU JUCA', skinR:200,skinG:148,skinB:96, shirtR:180,shirtG:50,shirtB:50, hat:true },
-  { name: 'MARINA', skinR:215,skinG:168,skinB:128, shirtR:55,shirtG:165,shirtB:80, hat:false },
-  { name: 'PEDRO', skinR:198,skinG:158,skinB:118, shirtR:205,shirtG:205,shirtB:225, hat:false },
-  { name: 'D.CONCEIÇÃO', skinR:188,skinG:142,skinB:102, shirtR:225,shirtG:182,shirtB:52, hat:false },
-  { name: 'TONHO', skinR:192,skinG:148,skinB:104, shirtR:82,shirtG:82,shirtB:92, hat:true },
-  { name: 'BIU', skinR:172,skinG:132,skinB:92, shirtR:48,shirtG:122,shirtB:48, hat:true },
-  { name: 'LENA', skinR:222,skinG:178,skinB:138, shirtR:245,shirtG:242,shirtB:205, hat:false },
-  { name: 'DR.COSTA', skinR:202,skinG:162,skinB:122, shirtR:245,shirtG:245,shirtB:250, hat:false },
-  { name: 'ANA', skinR:218,skinG:172,skinB:132, shirtR:162,shirtG:82,shirtB:182, hat:false },
-  { name: 'PROF.CLARA', skinR:228,skinG:182,skinB:142, shirtR:78,shirtG:122,shirtB:205, hat:false }
+  { name: 'SEU JUCA', skinR: 200, skinG: 148, skinB: 96, hairR: 55, hairG: 38, hairB: 18,
+    shirtR: 180, shirtG: 50, shirtB: 50, pantR: 100, pantG: 70, pantB: 40, hat: true, coat: false,
+    beltR: 80, beltG: 55, beltB: 30, bootR: 55, bootG: 38, bootB: 20 },
+  { name: 'MARINA', skinR: 215, skinG: 168, skinB: 128, hairR: 38, hairG: 24, hairB: 10,
+    shirtR: 55, shirtG: 165, shirtB: 80, pantR: 48, pantG: 80, pantB: 145, hat: false, coat: false,
+    beltR: 30, beltG: 50, beltB: 90, bootR: 35, bootG: 55, bootB: 105 },
+  { name: 'PEDRO', skinR: 198, skinG: 158, skinB: 118, hairR: 78, hairG: 52, hairB: 28,
+    shirtR: 205, shirtG: 205, shirtB: 225, pantR: 58, pantG: 78, pantB: 162, hat: false, coat: false,
+    beltR: 38, beltG: 48, beltB: 100, bootR: 40, bootG: 50, bootB: 110 },
+  { name: 'D. CONCEIÇÃO', skinR: 188, skinG: 142, skinB: 102, hairR: 185, hairG: 185, hairB: 188,
+    shirtR: 225, shirtG: 182, shirtB: 52, pantR: 58, pantG: 38, pantB: 82, hat: false, coat: false,
+    beltR: 38, beltG: 22, beltB: 55, bootR: 42, bootG: 28, bootB: 60 },
+  { name: 'TONHO', skinR: 192, skinG: 148, skinB: 104, hairR: 48, hairG: 32, hairB: 14,
+    shirtR: 82, shirtG: 82, shirtB: 92, pantR: 58, pantG: 58, pantB: 70, hat: true, coat: false,
+    beltR: 40, beltG: 40, beltB: 50, bootR: 38, bootG: 38, bootB: 48 },
+  { name: 'BIU', skinR: 172, skinG: 132, skinB: 92, hairR: 18, hairG: 12, hairB: 8,
+    shirtR: 48, shirtG: 122, shirtB: 48, pantR: 38, pantG: 88, pantB: 38, hat: true, coat: false,
+    beltR: 25, beltG: 58, beltB: 25, bootR: 28, bootG: 62, bootB: 28 },
+  { name: 'LENA', skinR: 222, skinG: 178, skinB: 138, hairR: 205, hairG: 162, hairB: 58,
+    shirtR: 245, shirtG: 242, shirtB: 205, pantR: 205, pantG: 202, pantB: 165, hat: false, coat: false,
+    beltR: 130, beltG: 128, beltB: 100, bootR: 140, bootG: 138, bootB: 108 },
+  { name: 'DR. COSTA', skinR: 202, skinG: 162, skinB: 122, hairR: 58, hairG: 42, hairB: 28,
+    shirtR: 245, shirtG: 245, shirtB: 250, pantR: 78, pantG: 78, pantB: 100, hat: false, coat: true,
+    beltR: 50, beltG: 50, beltB: 68, bootR: 35, bootG: 35, bootB: 50 },
+  { name: 'ANA', skinR: 218, skinG: 172, skinB: 132, hairR: 28, hairG: 18, hairB: 8,
+    shirtR: 162, shirtG: 82, shirtB: 182, pantR: 58, pantG: 58, pantB: 82, hat: false, coat: false,
+    beltR: 38, beltG: 38, beltB: 55, bootR: 42, bootG: 42, bootB: 58 },
+  { name: 'PROF. CLARA', skinR: 228, skinG: 182, skinB: 142, hairR: 118, hairG: 78, hairB: 38,
+    shirtR: 78, shirtG: 122, shirtB: 205, pantR: 58, pantG: 48, pantB: 82, hat: false, coat: false,
+    beltR: 38, beltG: 30, beltB: 55, bootR: 42, bootG: 35, bootB: 60 }
 ];
 
 // NPCs por fase
 const NPC_DATA = [
-  [{c:0,x:7.5,y:7.5,d:0},{c:1,x:10.5,y:5.5,d:1},{c:2,x:14.5,y:9.5,d:2},{c:3,x:5.5,y:13.5,d:3},{c:4,x:16.5,y:13.5,d:4}],
-  [{c:1,x:6.5,y:10.5,d:0},{c:5,x:12.5,y:6.5,d:1},{c:8,x:9.5,y:14.5,d:2}],
-  [{c:0,x:10.5,y:3.5,d:0},{c:1,x:15.5,y:7.5,d:1},{c:5,x:6.5,y:14.5,d:2},{c:9,x:12.5,y:12.5,d:3}],
-  [{c:1,x:5.5,y:8.5,d:0},{c:7,x:10.5,y:4.5,d:1},{c:8,x:15.5,y:10.5,d:2}],
-  [{c:0,x:6.5,y:6.5,d:0},{c:1,x:12.5,y:12.5,d:1},{c:2,x:15.5,y:6.5,d:2},{c:7,x:4.5,y:14.5,d:3},{c:4,x:9.5,y:4.5,d:4}],
-  [{c:0,x:8.5,y:8.5,d:0},{c:1,x:14.5,y:5.5,d:1},{c:6,x:6.5,y:14.5,d:2},{c:9,x:15.5,y:14.5,d:3},{c:3,x:4.5,y:4.5,d:4}]
+  [{ c: 0, x: 7.5, y: 7.5, d: 0 }, { c: 1, x: 10.5, y: 5.5, d: 1 }, { c: 2, x: 14.5, y: 9.5, d: 2 }, { c: 3, x: 5.5, y: 13.5, d: 3 }, { c: 4, x: 16.5, y: 13.5, d: 4 }],
+  [{ c: 1, x: 6.5, y: 10.5, d: 0 }, { c: 5, x: 12.5, y: 6.5, d: 1 }, { c: 8, x: 9.5, y: 14.5, d: 2 }],
+  [{ c: 0, x: 10.5, y: 3.5, d: 0 }, { c: 1, x: 15.5, y: 7.5, d: 1 }, { c: 5, x: 6.5, y: 14.5, d: 2 }, { c: 9, x: 12.5, y: 12.5, d: 3 }],
+  [{ c: 1, x: 5.5, y: 8.5, d: 0 }, { c: 7, x: 10.5, y: 4.5, d: 1 }, { c: 8, x: 15.5, y: 10.5, d: 2 }],
+  [{ c: 0, x: 6.5, y: 6.5, d: 0 }, { c: 1, x: 12.5, y: 12.5, d: 1 }, { c: 2, x: 15.5, y: 6.5, d: 2 }, { c: 7, x: 4.5, y: 14.5, d: 3 }, { c: 4, x: 9.5, y: 4.5, d: 4 }],
+  [{ c: 0, x: 8.5, y: 8.5, d: 0 }, { c: 1, x: 14.5, y: 5.5, d: 1 }, { c: 6, x: 6.5, y: 14.5, d: 2 }, { c: 9, x: 15.5, y: 14.5, d: 3 }, { c: 3, x: 4.5, y: 4.5, d: 4 }]
 ];
 
 const DIALOGUES = [
-  [['Essa terra tá pedindo socorro...','Encontre os 5 pontos!']],
-  [['Modo noturno ativo!','Procure as pragas!']],
-  [['O timer tá rodando!','4 minutos!']],
-  [['Coleta as amostras...','Cada uma revela o veneno.']],
-  [['Planta nos pontos azuis!','A natureza vai se curar.']],
-  [['Drone pronto!','Inspecione todas as áreas!']]
+  [['Essa terra tá pedindo socorro, Tico...', 'Quarenta anos lavrando aqui.', 'Você vê o que eu sinto no olho?'],
+   ['O scanner mapeia acidez e umidade.', 'Cada ponto crítico aparece no display.', 'Encontre os 5 pontos vermelhos!'],
+   ['Papai tá certo de desconfiar...', 'Mas os dados não mentem, sabe?', 'A safra não espera!'],
+   ['Minha mãe cuidou desta terra por décadas.', 'Agora é a nossa vez de protegê-la.', 'Que bom que vieram ajudar!'],
+   ['Trator na oficina de novo...', 'Se fosse digital não quebraria tanto!', 'Mas vamos continuar no braço!']],
+  [['Modo noturno ativo! Cuidado com o milho.', 'O infravermelho detecta o calor das pragas.', 'Procura manchas alaranjadas no scanner.'],
+   ['Guarda rural aqui. Tudo quieto por enquanto.', 'Mas à noite as pragas ficam espertas.', 'Anda devagar pra não espantar.'],
+   ['Vim registrar a infestação pro jornal.', 'Isso é manchete nacional, sabia?', 'Documente cada praga!']],
+  [['O timer tá rodando! Corre Tico!', 'Cada bomba desativada salva o rio.', '4 minutos pra zerar tudo!'],
+   ['Analisei as amostras: contaminação grave!', 'O agrotóxico é ilegal no Brasil.', 'Desative as bombas — vai rápido!'],
+   ['Filmando tudo aqui. Vai pro ar amanhã.', 'As bombas ficam nos galpões laranja.', 'Vai rápido antes que percebam!'],
+   ['Professor me mandou ver o campo.', 'Isso é o que estudamos na teoria...', 'Que horror na prática!']],
+  [['Trinta anos de trabalho no lixo...', 'Mas a terra se recupera. Eu sei que sim.', 'Coleta as amostras mais escuras primeiro.'],
+   ['Com estas amostras analisamos os danos.', 'Precisamos de dados para a recuperação.', 'Evita as poças de resíduo!'],
+   ['Pedro me ligou ontem chorando.', 'A família inteira preocupada.', 'Seja forte, vamos reconstruir isso.']],
+  [['Cada muda é uma promessa de vida.', 'A natureza tem memória, ela volta.', 'Planta nos pontos azuis, Tico!'],
+   ['Raízes profundas filtram o solo.', 'Escolhemos espécies nativas aqui.', 'Beleza ver o verde voltando.'],
+   ['Minha mãe dizia: planta uma árvore.', 'Você nunca sabe quem vai descansar.', 'Que emocionante esse momento!'],
+   ['Documentando a recuperação.', 'Isso vai virar estudo de caso.', 'Mais uma muda plantada!'],
+   ['Avó Conceição tá emocionada.', 'Nunca vi ela assim antes.', 'Esse projeto é muito bonito.']],
+  [['A lavoura tá renascendo, Tico!', 'Nunca duvidei da terra do Paraná.', 'Inspeciona cada setor com o drone.'],
+   ['Certificação sustentável requer isso.', 'Cada área confirmada = ponto.', 'Você vai conseguir!'],
+   ['As abelhas voltaram! Sinal bom!', 'Colmeia nova instalada ontem.', 'A biodiversidade tá voltando!'],
+   ['Trouxe os alunos pra ver o campo.', 'Educação ambiental na prática!', 'Que exemplo incrível!'],
+   ['Meu marido vai ficar orgulhoso.', 'Essa terra vai voltar pro bisneto.', 'Continue, tô torcendo!']]
 ];
 
 // ═════════════════════════════════════════════════════════════
-// MAPAS
+// MAPAS 24×24
+// 0=chão 1=parede 2=árvore 3=celeiro 4=milho 5=pedra 6=água 7=palha
 // ═════════════════════════════════════════════════════════════
-const SPAWNS = [[3.5,3.5,0],[2.5,3.5,0],[2.5,16.5,0],[2.5,2.5,0],[3.5,3.5,0],[3.5,3.5,0]];
+const SPAWNS = [[3.5, 3.5, 0], [2.5, 3.5, 0], [2.5, 16.5, 0], [2.5, 2.5, 0], [3.5, 3.5, 0], [3.5, 3.5, 0]];
 const MAPS = [
-  (()=>{let m=Array(24).fill().map(()=>Array(24).fill(0)); for(let i=0;i<24;i++){m[0][i]=1;m[23][i]=1;m[i][0]=1;m[i][23]=1;} for(let i=0;i<200;i++){let x=floor(random(1,23)),y=floor(random(1,23)); if(m[y][x]===0) m[y][x]=random()<0.3?2:0;} return m;})(),
-  (()=>{let m=Array(24).fill().map(()=>Array(24).fill(0)); for(let i=0;i<24;i++){m[0][i]=1;m[23][i]=1;m[i][0]=1;m[i][23]=1;} for(let i=0;i<200;i++){let x=floor(random(1,23)),y=floor(random(1,23)); if(m[y][x]===0) m[y][x]=random()<0.3?2:0;} return m;})(),
-  (()=>{let m=Array(24).fill().map(()=>Array(24).fill(0)); for(let i=0;i<24;i++){m[0][i]=1;m[23][i]=1;m[i][0]=1;m[i][23]=1;} for(let i=0;i<200;i++){let x=floor(random(1,23)),y=floor(random(1,23)); if(m[y][x]===0) m[y][x]=random()<0.3?2:0;} return m;})(),
-  (()=>{let m=Array(24).fill().map(()=>Array(24).fill(0)); for(let i=0;i<24;i++){m[0][i]=1;m[23][i]=1;m[i][0]=1;m[i][23]=1;} for(let i=0;i<200;i++){let x=floor(random(1,23)),y=floor(random(1,23)); if(m[y][x]===0) m[y][x]=random()<0.3?2:0;} return m;})(),
-  (()=>{let m=Array(24).fill().map(()=>Array(24).fill(0)); for(let i=0;i<24;i++){m[0][i]=1;m[23][i]=1;m[i][0]=1;m[i][23]=1;} for(let i=0;i<200;i++){let x=floor(random(1,23)),y=floor(random(1,23)); if(m[y][x]===0) m[y][x]=random()<0.3?2:0;} return m;})(),
-  (()=>{let m=Array(24).fill().map(()=>Array(24).fill(0)); for(let i=0;i<24;i++){m[0][i]=1;m[23][i]=1;m[i][0]=1;m[i][23]=1;} for(let i=0;i<200;i++){let x=floor(random(1,23)),y=floor(random(1,23)); if(m[y][x]===0) m[y][x]=random()<0.3?2:0;} return m;})()
+  [[1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 4, 4, 4, 4, 0, 0, 2, 0, 0, 0, 0, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 1], [1, 0, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 1], [1, 0, 4, 4, 4, 4, 0, 0, 0, 0, 7, 0, 0, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 4, 4, 4, 0, 0, 0, 1], [1, 0, 4, 4, 0, 0, 1, 3, 3, 1, 0, 0, 0, 2, 0, 0, 4, 4, 4, 4, 0, 0, 0, 1], [1, 0, 4, 4, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 4, 4, 4, 4, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 4, 4, 4, 0, 0, 0, 1], [1, 0, 4, 4, 4, 0, 0, 0, 7, 0, 0, 0, 0, 0, 0, 0, 4, 4, 4, 4, 0, 0, 0, 1], [1, 0, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 4, 4, 4, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 4, 0, 0, 0, 0, 0, 1], [1, 0, 4, 4, 0, 0, 0, 7, 4, 4, 4, 0, 0, 0, 0, 0, 4, 4, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]],
+  [[1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 4, 4, 4, 4, 0, 0, 2, 0, 0, 0, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 4, 4, 4, 4, 4, 4, 0, 0, 0, 0, 0, 1], [1, 0, 4, 4, 4, 4, 0, 0, 2, 0, 0, 0, 4, 4, 4, 4, 4, 4, 0, 0, 0, 0, 0, 1], [1, 0, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 4, 4, 4, 4, 4, 4, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 4, 4, 4, 4, 0, 0, 2, 0, 0, 0, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 4, 0, 0, 0, 0, 0, 1], [1, 0, 4, 4, 0, 0, 0, 0, 4, 4, 4, 0, 0, 0, 0, 0, 4, 4, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]],
+  [[1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 1], [1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]],
+  [[1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]],
+  [[1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 2, 0, 0, 0, 0, 2, 0, 0, 0, 0, 2, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 2, 0, 0, 0, 0, 2, 0, 0, 0, 0, 2, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]],
+  [[1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 4, 4, 4, 4, 0, 2, 0, 0, 0, 2, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 4, 4, 4, 0, 0, 2, 0, 0, 2, 0, 0, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 4, 4, 4, 4, 0, 0, 2, 0, 0, 0, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 4, 4, 0, 0, 0, 0, 4, 4, 4, 4, 0, 0, 0, 0, 4, 4, 0, 0, 0, 0, 0, 1], [1, 0, 4, 4, 0, 2, 0, 0, 4, 4, 4, 4, 0, 0, 2, 0, 4, 4, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]]
 ];
 const MAPSIZE = 24;
 
 const PHASE_DATA = [
-  { name:'FASE 1', subtitle:'Escaneamento do Solo', tool:'SCANNER', toolTip:'[E] Escanear', objLabel:'Pontos', objTotal:5, hasTimer:false, icone:'🔍', skyTop:[110,185,248], skyBot:[65,138,210] },
-  { name:'FASE 2', subtitle:'Mapeamento Noturno', tool:'SCANNER N', toolTip:'[E] Escanear', objLabel:'Pragas', objTotal:6, hasTimer:false, icone:'🐛', skyTop:[8,12,28], skyBot:[4,8,20] },
-  { name:'FASE 3', subtitle:'Interrupção', tool:'HACKEAR', toolTip:'[E] Hackear', objLabel:'Bombas', objTotal:5, hasTimer:true, timerSec:240, icone:'💣', skyTop:[205,100,22], skyBot:[160,68,14] },
-  { name:'FASE 4', subtitle:'Coleta de Amostras', tool:'COLETOR', toolTip:'[E] Coletar', objLabel:'Amostras', objTotal:6, hasTimer:false, icone:'🧪', skyTop:[72,70,82], skyBot:[45,44,55] },
-  { name:'FASE 5', subtitle:'Plantio de Remediação', tool:'PLANTAR', toolTip:'[E] Plantar', objLabel:'Mudas', objTotal:7, hasTimer:false, icone:'🌱', skyTop:[60,185,205], skyBot:[32,140,165] },
-  { name:'FASE 6', subtitle:'Inspeção Final', tool:'DRONE', toolTip:'[E] Inspecionar', objLabel:'Áreas', objTotal:6, hasTimer:false, icone:'🚁', skyTop:[82,205,252], skyBot:[42,165,222] }
+{ name: 'FASE 1', subtitle: 'Escaneamento do Solo', tool: 'SCANNER', toolTip: '[E] Escanear ponto crítico', objLabel: 'Pontos escaneados', objTotal: 5, hasTimer: false, icone: '🔍',
+  skyTop: [110, 185, 248], skyBot: [65, 138, 210], floorTop: [115, 82, 38], floorBot: [72, 50, 20], wallR: 148, wallG: 108, wallB: 58, fogR: 145, fogG: 165, fogB: 190, fogDist: 14, night: false, fogDensity: 0.06 },
+  { name: 'FASE 2', subtitle: 'Mapeamento Noturno de Pragas', tool: 'SCANNER NOTURNO', toolTip: '[E] Escanear praga', objLabel: 'Pragas mapeadas', objTotal: 6, hasTimer: false,
+    skyTop: [8, 12, 28], skyBot: [4, 8, 20], floorTop: [18, 28, 12], floorBot: [8, 14, 5], wallR: 38, wallG: 48, wallB: 30, fogR: 12, fogG: 22, fogB: 14, fogDist: 5.5, night: true, fogDensity: 0.16 },
+  { name: 'FASE 3', subtitle: 'Interrupção do Agrotóxico', tool: 'HACKEAR', toolTip: '[E] Hackear bomba ilegal', objLabel: 'Bombas desativadas', objTotal: 5, hasTimer: true, timerSec: 240,
+    skyTop: [205, 100, 22], skyBot: [160, 68, 14], floorTop: [118, 72, 22], floorBot: [80, 48, 10], wallR: 172, wallG: 98, wallB: 32, fogR: 190, fogG: 115, fogB: 48, fogDist: 9, night: false, fogDensity: 0.10 },
+  { name: 'FASE 4', subtitle: 'Coleta de Amostras Contaminadas', tool: 'COLETOR', toolTip: '[E] Coletar amostra de solo', objLabel: 'Amostras coletadas', objTotal: 6, hasTimer: false,
+    skyTop: [72, 70, 82], skyBot: [45, 44, 55], floorTop: [62, 52, 45], floorBot: [38, 30, 25], wallR: 88, wallG: 82, wallB: 78, fogR: 80, fogG: 78, fogB: 85, fogDist: 9, night: false, fogDensity: 0.10 },
+  { name: 'FASE 5', subtitle: 'Plantio de Remediação', tool: 'PLANTADEIRA', toolTip: '[E] Plantar muda nativa', objLabel: 'Mudas plantadas', objTotal: 7, hasTimer: false,
+    skyTop: [60, 185, 205], skyBot: [32, 140, 165], floorTop: [42, 108, 52], floorBot: [25, 68, 30], wallR: 42, wallG: 108, wallB: 68, fogR: 120, fogG: 178, fogB: 195, fogDist: 12, night: false, fogDensity: 0.07 },
+  { name: 'FASE 6', subtitle: 'Voo Final de Inspeção', tool: 'DRONE', toolTip: '[E] Inspecionar área', objLabel: 'Áreas inspecionadas', objTotal: 6, hasTimer: false,
+    skyTop: [82, 205, 252], skyBot: [42, 165, 222], floorTop: [55, 148, 55], floorBot: [32, 100, 32], wallR: 68, wallG: 152, wallB: 68, fogR: 150, fogG: 210, fogB: 240, fogDist: 16, night: false, fogDensity: 0.05 }
 ];
 
 const CUTSCENE_DATA = [
-  [['narrador','O solo está cansado...',200],['juca','Use o scanner!',200],['tico','Encontre os pontos!',200]],
-  [['narrador','Pragas atacam à noite...',200],['marina','Ative o scanner noturno!',200],['tico','Elimine todas!',200]],
-  [['narrador','Bombas ilegais no rio!',200],['costa','Desative em 4 minutos!',200],['tico','Corra contra o tempo!',200]],
-  [['narrador','Solo contaminado...',200],['conceicao','Colete as amostras!',200],['tico','Cada amostra revela o veneno!',200]],
-  [['narrador','A natureza pode se curar...',200],['pedro','Plante mudas nativas!',200],['tico','Use os pontos azuis!',200]],
-  [['narrador','Última etapa!',200],['lena','Inspecione com o drone!',200],['tico','Voe sobre todas as áreas!',200]]
+  [['narrador', 'Paraná, interior. O sol nasce sobre 40 anos de trabalho e esperança.', 260],
+   ['juca', 'Essa terra tem memória, Tico. Cada sulco conta uma história.', 290],
+   ['marina', 'Pai, o scanner detecta acidez, umidade e temperatura em tempo real.', 280],
+   ['juca', 'Tecnologia em cima da minha terra... me parece invasão, Marina.', 270],
+   ['pedro', 'Tio Juca, os vizinhos já usam isso. É o futuro do campo.', 280],
+   ['conceicao', 'Meu filho, o progresso bem usado não destrói — ele protege.', 270],
+   ['tico', '[TICO] Scanner ativo! Encontre os pontos críticos no campo.', 220]],
+  [['narrador', 'Com a lavoura mapeada de dia, as pragas atacam na calada da noite.', 260],
+   ['marina', 'Os dados do dia apontam infestação severa no setor norte.', 280],
+   ['biu', 'Guarda rural aqui. Já interceptei três lotes suspeitos essa semana.', 270],
+   ['tico', '[TICO] Modo visão noturna e infravermelho ativados.', 240],
+   ['ana', 'Vim registrar pra reportagem. Isso é crise nacional, gente.', 270],
+   ['tico', '[TICO] Cada praga mapeada protege o restante da safra!', 220]],
+  [['narrador', 'O vizinho age na ilegalidade. Agrotóxicos ameaçam o aquífero.', 270],
+   ['marina', 'Preciso hackear os sistemas de irrigação! O rio está em risco!', 300],
+   ['costa', 'Analisei as amostras: contaminação gravíssima. Aja rápido!', 280],
+   ['juca', 'Se o rio for afetado, toda a região perde o sustento.', 280],
+   ['tico', '[TICO] ALERTA! 5 bombas detectadas. TIMER: 4 MINUTOS!', 250]],
+  [['narrador', 'O pior aconteceu. Agrotóxico ilegal devastou parte do campo.', 270],
+   ['juca', 'Quarenta anos... Olha o que fizeram com minha terra.', 300],
+   ['pedro', 'Pai vai se recuperar, mas a terra precisa de ajuda urgente.', 280],
+   ['marina', 'Com as amostras certas, desenvolvemos o protocolo de cura.', 285],
+   ['costa', 'Cada amostra revela o perfil de contaminação. Seja preciso.', 270],
+   ['tico', '[TICO] Protocolo de análise de solo iniciado!', 230]],
+  [['narrador', 'Os resultados chegaram. A recuperação é possível!', 260],
+   ['marina', 'As análises mostram que espécies nativas restauram o solo!', 290],
+   ['lena', 'Minhas abelhas voltaram! As flores nativas as atraem.', 280],
+   ['juca', 'Então vamos plantar. Cada muda é uma aposta no futuro.', 275],
+   ['conceicao', 'Minha mãe plantava nativas. Ela sabia o que estava fazendo.', 280],
+   ['tico', '[TICO] Mudas de remediação prontas. Plante nos pontos azuis!', 230]],
+  [['narrador', 'Meses depois. A lavoura pulsa de vida novamente.', 250],
+   ['juca', 'A tecnologia salvou minha terra. Nunca pensei que diria isso.', 300],
+   ['pedro', 'A nova geração de agricultores vai precisar saber tudo isso.', 280],
+   ['marina', 'Ainda falta a inspeção final de drone pra certificação.', 275],
+   ['costa', 'Dados confirmam: solo dentro dos parâmetros sustentáveis!', 270],
+   ['lena', 'A colmeia triplicou! A biodiversidade está de volta!', 275],
+   ['tico', '[TICO] Drone pronto! Inspecione todas as áreas para a vitória!', 240]]
 ];
 
 const ENDING_SCENES = [
-  ['narrador','Parabéns! Você restaurou o solo!',300],
-  ['juca','A tecnologia salvou minha terra.',280],
-  ['marina','Agro forte e futuro sustentável!',280],
-  ['tico','Missão cumprida! Obrigado por jogar!',260]
+  ['narrador', 'A lavoura foi recuperada. O rio voltou a correr limpo.', 285],
+  ['juca', 'Marina, você tinha razão desde o princípio. Me perdoe a teimosia.', 295],
+  ['pedro', 'Esse campo vai continuar por gerações graças a vocês.', 285],
+  ['marina', 'É o único caminho: agro forte E futuro sustentável juntos.', 285],
+  ['conceicao', 'Esta terra sempre soube se curar. Só precisava de ajuda.', 280],
+  ['lena', 'As abelhas cantam de novo. Isso diz tudo.', 270],
+  ['tico', '[TICO] Missão concluída! Agrinho 2026 — Agro forte, futuro sustentável!', 265],
+  ['narrador', 'Obrigado por jogar e por acreditar num campo mais justo e verde.', 300]
 ];
-
-// ═════════════════════════════════════════════════════════════
-// FUNÇÕES DE ÁUDIO (DESATIVADAS)
-// ═════════════════════════════════════════════════════════════
-function initGameAudio() { audioReady = true; }
-function updateGameAudio() {}
-function playStep() {}
-function playPickup() {}
-function playDialog() {}
-function iniciarMusicaTrailer() {}
-function musicUpdate() {}
-function pararMusicaTrailer() {}
 
 // ═════════════════════════════════════════════════════════════
 // SETUP
 // ═════════════════════════════════════════════════════════════
+
 function setup() {
-  let cnv = createCanvas(800, 600);
+  let cnv = createCanvas(800, 500);
   cnvElt = cnv.elt;
   frameRate(60);
-  textFont('Courier New');
-  textAlign(CENTER, CENTER);
-  
-  cnvElt.addEventListener('mousedown', () => {
-    if(campaignActive && campaignState === 'gameplay' && cnvElt.requestPointerLock)
-      cnvElt.requestPointerLock();
+  noiseDetail(4, 0.5);
+
+  cnvElt.addEventListener('mousedown', function () {
+    if (campaignActive && campaignState === 'gameplay') {
+      if (cnvElt.requestPointerLock) cnvElt.requestPointerLock();
+    }
   });
-  document.addEventListener('pointerlockchange', () => {
+  document.addEventListener('pointerlockchange', function () {
     pointerLocked = (document.pointerLockElement === cnvElt);
-    if(!pointerLocked) { nativeMovX = 0; nativeMovY = 0; }
+    if (!pointerLocked) { nativeMovX = 0; nativeMovY = 0; }
   });
-  document.addEventListener('mousemove', (e) => {
-    if(pointerLocked) { nativeMovX += e.movementX || 0; nativeMovY += e.movementY || 0; }
+  document.addEventListener('mousemove', function (e) {
+    if (pointerLocked) { nativeMovX += (e.movementX || 0); nativeMovY += (e.movementY || 0); }
   });
-  
-  for(let i=0;i<100;i++) menuStars.push({ x:random(width), y:random(height*0.6), r:random(1,3) });
-  for(let i=0;i<70;i++) windParts.push({ x:random(width), y:random(height), speed:random(2,8), alpha:random(20,90), len:random(15,55), t:random(TWO_PI) });
-  for(let i=0;i<60;i++) stormParts.push({ x:random(width), y:random(height), len:random(8,22), spd:random(12,28), a:random(60,180) });
-  
+
+  buildTextures();
+
+  osciladorFundo = new p5.Oscillator('sine');
+  osciladorFundo.freq(60); osciladorFundo.amp(0.08);
+  envelopeImpacto = new p5.Envelope();
+  envelopeImpacto.setADSR(0.01, 0.1, 0.1, 0.4);
+  envelopeImpacto.setRange(0.4, 0);
+  osciladorImpacto = new p5.Oscillator('triangle');
+  osciladorImpacto.freq(120);
+  osciladorImpacto.amp(envelopeImpacto);
+
+  // Partículas de cena
+  nuvens = []; passaros = []; graos = []; bovinos = []; poeira = []; brasas = []; menuStars = [];
+  for (var i = 0; i < 14; i++) nuvens.push({ x: random(width), y: random(25, 115), w: random(85, 215), vel: random(0.05, 0.22), alpha: random(150, 235) });
+  for (var i = 0; i < 9; i++) passaros.push({ x: random(width), y: random(50, 145), tam: random(4, 10), vel: random(0.3, 1.0), fase: random(TWO_PI) });
+  for (var i = 0; i < 240; i++) graos.push({ x: random(width * 0.1, width * 0.9), y: random(-650, -5), vy: random(2.5, 7.5), vx: random(-0.8, 0.8), r: random(3, 7.5), ativo: true });
+  for (var i = 0; i < 30; i++) bovinos.push({ x: random(60, width - 60), y: random(80, height - 80), ang: random(TWO_PI), vel: random(0.10, 0.45), tipo: floor(random(3)), tam: random(12, 22) });
+  for (var i = 0; i < 80; i++) poeira.push({ x: random(width), y: random(90, height - 50), t: random(2, 9), a: random(12, 48) });
+  for (var i = 0; i < 60; i++) brasas.push({ x: random(width), y: random(height), vy: random(-1.5, -0.22), a: random(100, 225), t: random(1, 4) });
+  for (var i = 0; i < 110; i++) menuStars.push({ x: random(width), y: random(height * 0.56), r: random(0.5, 2.5) });
+  for (var i = 0; i < 70; i++) windParts.push({ x: random(width), y: random(height), speed: random(2, 8), alpha: random(20, 90), len: random(15, 55), curveAmp: random(1, 4), t: random(TWO_PI) });
+  for (var i = 0; i < 60; i++) stormParts.push({ x: random(width), y: random(height), len: random(8, 22), spd: random(12, 28), a: random(60, 180) });
+
+  zBuf = new Float32Array(width);
+
+  // Grade de plantação
   iniciarPlantacao();
-  try { let s = localStorage.getItem('agrinho2026_v8'); if(s) phasesUnlocked = JSON.parse(s); } catch(e) {}
+
+  try { var s = localStorage.getItem('agrinho2026_v8'); if (s) phasesUnlocked = JSON.parse(s); } catch (e) { }
 }
 
-function iniciarPlantacao() {
-  plantGrid = [];
-  for(let r=0; r<PLANT_ROWS; r++)
-    for(let c=0; c<PLANT_COLS; c++)
-      plantGrid.push({ col:c, row:r, stage:0, pH:random(4.5,8.0), water:random(20,80), hasPest:false, growTimer:0 });
-  plantResources = { agua:100, creditos:100, solo:100, sementes:30 };
-  plantTool = 0; plantMsg = ''; plantMsgTimer = 0; plantWin = false;
-  plantCursor = { col:0, row:0 };
+// ═════════════════════════════════════════════════════════════
+// TEXTURAS
+// ═════════════════════════════════════════════════════════════
+
+const TEX = 64;
+
+let txWall = [];
+let txTree = [];
+let txBarn = [];
+let txCorn = [];
+let txRock = [];
+function buildTextures() {
+  txWall = []; txTree = []; txBarn = []; txCorn = []; txRock = [];
+  for (var v = 0; v < TEX; v++) for (var u = 0; u < TEX; u++) {
+    var row = floor(v / 8), col2 = floor(u / 16), off = (row % 2) * 8, bu = (u + off) % 16;
+    var mortar = (bu < 1 || bu > 14 || v % 8 < 1 || v % 8 > 6) ? 0.25 : 1.0;
+    var rough = noise(u * 0.22 + row * 7.3, v * 0.18) * 0.28 + sin(u * 1.1 + v * 0.3) * 0.06 + 0.75;
+    txWall.push(rough * mortar);
+  }
+  for (var v = 0; v < TEX; v++) for (var u = 0; u < TEX; u++) {
+    var grain = noise(u * 0.09 + v * 0.55, v * 0.12) * 0.45;
+    var streak = sin(u * 0.25 + noise(v * 0.08) * 3) * 0.12;
+    var knot = (noise(u * 0.55, v * 0.38) > 0.70) ? 0.35 : 1.0;
+    txTree.push((grain + streak + 0.55) * knot);
+  }
+  for (var v = 0; v < TEX; v++) for (var u = 0; u < TEX; u++) {
+    var grain = noise(u * 0.06 + v * 0.02, v * 0.5) * 0.38;
+    var gap = (u % 10 < 1) ? 0.18 : 1.0;
+    var scratch = sin(v * 0.8 + u * 0.04) * 0.07;
+    txBarn.push((grain + scratch + 0.62) * gap);
+  }
+  for (var v = 0; v < TEX; v++) for (var u = 0; u < TEX; u++) {
+    var vein = max(0, 1 - abs(u - TEX / 2) * 0.12);
+    var leaf = noise(u * 0.15, v * 0.18) * 0.30 + vein * 0.35 + 0.50;
+    var stripe = sin(v * 0.55) * 0.08;
+    txCorn.push(min(leaf + stripe, 1.0));
+  }
+  for (var v = 0; v < TEX; v++) for (var u = 0; u < TEX; u++) {
+    var base = noise(u * 0.22, v * 0.22) * 0.42 + 0.48;
+    var crack = (noise(u * 0.38 + 100, v * 0.38 + 100) > 0.62) ? 0.30 : 1.0;
+    var chip = noise(u * 0.8, v * 0.8) * 0.15;
+    txRock.push((base + chip) * crack);
+  }
 }
+function getTex(tile, col, row) {
+  var u = constrain(col, 0, TEX - 1), v = constrain(row, 0, TEX - 1), idx = v * TEX + u;
+  switch (tile) { case 1: return txWall[idx]; case 2: return txTree[idx]; case 3: return txBarn[idx]; case 4: return txCorn[idx]; case 5: return txRock[idx]; default: return 0.85; }
+}
+
+// ═════════════════════════════════════════════════════════════
+// ÁUDIO
+// ═════════════════════════════════════════════════════════════
+function iniciarMusicaTrailer() {
+  if (musicInited) return; musicInited = true;
+  padOscs = [];
+  var det = [-0.004, 0, 0.004];
+  for (var i = 0; i < 3; i++) { var o = new p5.Oscillator('sawtooth'); o.freq(ACORDES[0][i] * (1 + det[i])); o.amp(0); o.start(); padOscs.push(o); }
+  bassOsc = new p5.Oscillator('sine'); bassOsc.freq(BAIXO_FREQS[0]); bassOsc.amp(0); bassOsc.start();
+  melodyEnv = new p5.Envelope(); melodyEnv.setADSR(0.02, 0.18, 0.3, 0.6); melodyEnv.setRange(0.12, 0);
+  melodyOsc = new p5.Oscillator('triangle'); melodyOsc.freq(329.63); melodyOsc.amp(melodyEnv); melodyOsc.start();
+  hihatEnv = new p5.Envelope(); hihatEnv.setADSR(0.001, 0.04, 0.01, 0.08); hihatEnv.setRange(0.04, 0);
+  hihatOsc = new p5.Oscillator('square'); hihatOsc.freq(8000); hihatOsc.amp(hihatEnv); hihatOsc.start();
+  kickEnv = new p5.Envelope(); kickEnv.setADSR(0.001, 0.12, 0.01, 0.2); kickEnv.setRange(0.18, 0);
+  kickOsc = new p5.Oscillator('sine'); kickOsc.freq(55); kickOsc.amp(kickEnv); kickOsc.start();
+}
+function musicUpdate() {
+  if (!musicAtiva || !musicInited) return;
+  musicFrame++;
+  if (musicFrame >= proxAcorde) { proxAcorde = musicFrame + ACORDE_DUR; acordeAtual = (acordeAtual + 1) % ACORDES.length; for (var i = 0; i < padOscs.length; i++) padOscs[i].freq(ACORDES[acordeAtual][i] * (1 + (i - 1) * 0.004)); bassOsc.freq(BAIXO_FREQS[acordeAtual]); }
+  if (musicFrame >= proxNota) { proxNota = musicFrame + MELODIA_DUR; var fr = MELODIA_FREQS[melodiaIdx % MELODIA_FREQS.length]; melodiaIdx++; if (fr > 0) { melodyOsc.freq(fr); melodyEnv.play(melodyOsc); } }
+  if (musicFrame >= proxKick) { proxKick = musicFrame + 120; kickEnv.play(kickOsc); }
+  if (musicFrame % 30 === 15) hihatEnv.play(hihatOsc);
+  for (var i = 0; i < padOscs.length; i++) padOscs[i].amp(0.045, 0.3);
+  bassOsc.amp(0.08, 0.3);
+}
+function pararMusicaTrailer() {
+  musicAtiva = false; if (!musicInited) return;
+  for (var i = 0; i < padOscs.length; i++) padOscs[i].amp(0, 1.5);
+  if (bassOsc) bassOsc.amp(0, 1.5);
+}
+function initGameAudio() {
+  if (audioReady) return; audioReady = true;
+  windNoise = new p5.Noise('pink'); windNoise.amp(0); windNoise.start();
+  stepEnv = new p5.Envelope(); stepEnv.setADSR(0.001, 0.06, 0.01, 0.12); stepEnv.setRange(0.08, 0);
+  stepOsc = new p5.Oscillator('sine'); stepOsc.freq(90); stepOsc.amp(stepEnv); stepOsc.start();
+  pickupEnv = new p5.Envelope(); pickupEnv.setADSR(0.005, 0.15, 0.1, 0.3); pickupEnv.setRange(0.12, 0);
+  pickupOsc = new p5.Oscillator('triangle'); pickupOsc.freq(660); pickupOsc.amp(pickupEnv); pickupOsc.start();
+  dialogEnv = new p5.Envelope(); dialogEnv.setADSR(0.005, 0.1, 0.05, 0.2); dialogEnv.setRange(0.06, 0);
+  dialogOsc = new p5.Oscillator('sine'); dialogOsc.freq(440); dialogOsc.amp(dialogEnv); dialogOsc.start();
+}
+function updateGameAudio() {
+  if (!audioReady) return;
+  var targetWind = (campaignActive && campaignState === 'gameplay') || sandboxActive ? 0.05 : 0;
+  windAmp += (targetWind - windAmp) * 0.02;
+  windNoise.amp(windAmp);
+}
+function playStep() { if (!audioReady) return; stepOsc.freq(80 + random(40)); stepEnv.play(stepOsc); }
+function playPickup() { if (!audioReady) return; pickupOsc.freq(660); pickupEnv.play(pickupOsc); setTimeout(function () { if (pickupOsc) { pickupOsc.freq(880); pickupEnv.play(pickupOsc); } }, 80); }
+function playDialog() { if (!audioReady) return; dialogOsc.freq(350 + random(60)); dialogEnv.play(dialogOsc); }
 
 // ═════════════════════════════════════════════════════════════
 // DRAW PRINCIPAL
 // ═════════════════════════════════════════════════════════════
 function draw() {
-  background(20, 40, 20);
+  background(0);
   updateGameAudio();
-  let td = millis() - tempoEstado;
-  switch(estadoTela) {
+  var td = millis() - tempoEstado;
+  switch (estadoTela) {
     case 0: desenharTelaClique(); break;
-    case 1: desenharTelaAviso(); if(td>5200) mudarEstado(2); break;
-    case 2: desenharTelaEstudio(td); if(td>6200) mudarEstado(3); break;
+    case 1: desenharTelaAviso(); if (td > 5200) mudarEstado(2); break;
+    case 2: desenharTelaEstudio(td); if (td > 6200) mudarEstado(3); break;
     case 3: desenharMenuPrincipal(); break;
     case 4: rodarJogoPrincipal(); break;
   }
   rodapeCreditos();
 }
 
-function mudarEstado(s) { estadoTela = s; tempoEstado = millis(); }
-
+// ═════════════════════════════════════════════════════════════
+// TELAS INTRO
+// ═════════════════════════════════════════════════════════════
 function desenharTelaClique() {
-  for(let y=0; y<height; y++) stroke(lerp(72,38,y/height), lerp(128,88,y/height), lerp(188,138,y/height)), line(0,y,width,y);
-  fill(0,140); rect(width/2-280, height/2-80, 560, 160, 12);
-  fill(255,235,120); textSize(36); text('AGRINHO 2026', width/2, height/2-40);
-  fill(200,240,160); textSize(18); text('Agro forte, futuro sustentável', width/2, height/2+5);
-  fill(120,255,120, sin(frameCount*0.055)*255); textSize(14); text('[ CLIQUE PARA INICIAR ]', width/2, height/2+52);
+  for (var y = 0; y < height; y++) {
+    var t = y / height;
+    stroke(lerp(72, 38, t), lerp(128, 88, t), lerp(188, 138, t));
+    line(0, y, width, y);
+  }
+  noStroke();
+  desenharSol(width * 0.72, height * 0.22, 60);
+  fill(28, 55, 18);
+  beginShape(); vertex(0, height);
+  for (var x = 0; x <= width; x += 8) vertex(x, height * 0.7 + noise(x * 0.01 + frameCount * 0.001) * height * 0.08);
+  vertex(width, height); endShape(CLOSE);
+  noStroke(); fill(0, 140); rect(width / 2 - 280, height / 2 - 80, 560, 160, 12);
+  fill(255, 235, 120); textAlign(CENTER, CENTER); textFont('Georgia'); textStyle(BOLD); textSize(36);
+  text('AGRINHO 2026', width / 2, height / 2 - 40);
+  fill(200, 240, 160); textSize(18); textStyle(NORMAL);
+  text('Agro forte, futuro sustentável', width / 2, height / 2 + 5);
+  var p2 = sin(frameCount * 0.055) * 255;
+  fill(120, 255, 120, abs(p2)); textFont('Courier New'); textSize(14);
+  text('[ CLIQUE PARA INICIAR ]', width / 2, height / 2 + 52);
+  textStyle(NORMAL);
 }
 
 function desenharTelaAviso() {
-  for(let y=0; y<height; y++) stroke(lerp(8,22,y/height), lerp(18,48,y/height), lerp(8,18,y/height)), line(0,y,width,y);
-  fill(0,160); rect(width/2-320, height/2-90, 640, 180, 12);
-  fill(200,240,160); textSize(13);
-  text('AVISO — Concurso Agrinho 2026\n\nEste jogo simula desafios da produção agrícola.\nAlinhado ao tema: Equilíbrio entre produção e meio ambiente.', width/2, height/2);
+  for (var y = 0; y < height; y++) { stroke(lerp(8, 22, y / height), lerp(18, 48, y / height), lerp(8, 18, y / height)); line(0, y, width, y); }
+  noStroke(); fill(0, 160); rect(width / 2 - 320, height / 2 - 90, 640, 180, 12);
+  fill(200, 240, 160); textAlign(CENTER, CENTER); textFont('Courier New'); textSize(13);
+  text('AVISO — Concurso Agrinho 2026\n\nEste jogo simula desafios da produção agrícola.\nAlinhado ao tema: Equilíbrio entre produção e meio ambiente.\nNenhuma violência — apenas ciência, tecnologia e sustentabilidade.', width / 2, height / 2);
+  fill(140, 200, 120, 160); textSize(10); text('Personagens fictícios. Dados baseados em relatórios ambientais reais.', width / 2, height / 2 + 70);
 }
 
 function desenharTelaEstudio(td) {
-  for(let y=0; y<height; y++) stroke(lerp(4,18,y/height), lerp(8,28,y/height), lerp(4,12,y/height)), line(0,y,width,y);
-  let op = map(td, 0, 1500, 0, 255, true);
-  fill(0,160); rect(width/2-260, height/2-80, 520, 160, 10);
-  fill(255,op); textSize(28); text('AGRINHO 2026', width/2, height/2-28);
-  fill(180,240,140,op); textSize(15); text('Agro forte, futuro sustentável', width/2, height/2+12);
+  for (var y = 0; y < height; y++) { stroke(lerp(4, 18, y / height), lerp(8, 28, y / height), lerp(4, 12, y / height)); line(0, y, width, y); }
+  var op = map(td, 0, 1500, 0, 255, true);
+  noStroke(); fill(0, 160); rect(width / 2 - 260, height / 2 - 80, 520, 160, 10);
+  fill(255, op); textAlign(CENTER, CENTER); textFont('Georgia'); textStyle(BOLD); textSize(28); text('AGRINHO 2026', width / 2, height / 2 - 28);
+  fill(180, 240, 140, op); textSize(15); textStyle(NORMAL); text('Agro forte, futuro sustentável', width / 2, height / 2 + 12);
+  fill(130, 180, 110, op * 0.8); textFont('Courier New'); textSize(11); text('Uma solução tecnológica para o campo', width / 2, height / 2 + 42);
+  push(); stroke(120, 220, 80, op); strokeWeight(1.5); noFill();
+  anguloCubo += 0.018;
+  desenharCubo(width / 2, height / 2 - 115, 35, anguloCubo); pop();
 }
 
 function desenharMenuPrincipal() {
-  for(let y=0; y<height; y++) stroke(lerp(8,22,y/height), lerp(18,58,y/height), lerp(8,22,y/height)), line(0,y,width,y);
-  for(let s of menuStars) { fill(255,220,100, 80+sin(frameCount*0.04+s.x)*60); noStroke(); ellipse(s.x,s.y,s.r); }
-  fill(22,55,18); beginShape(); vertex(0,height);
-  for(let x=0; x<=width; x+=7) vertex(x, height*0.62 + noise(x*0.008+frameCount*0.001)*height*0.06);
-  vertex(width,height); endShape(CLOSE);
-  fill(28,80,22); beginShape(); vertex(0,height);
-  for(let x=0; x<=width; x+=6) vertex(x, height*0.70 + noise(x*0.012+frameCount*0.0008+10)*height*0.06);
-  vertex(width,height); endShape(CLOSE);
-  desenharSol(width*0.75, height*0.18, 55);
-  for(let i=0;i<nuvens.length;i++) { let n=nuvens[i]; n.x-=n.vel*0.6; if(n.x<-n.w) n.x=width+n.w; desenhaNuvem(n.x,n.y,n.w,n.alpha,false); }
-  
-  fill(0,200); rect(width/2-310,30,620,90,12);
-  fill(255,240,100); textSize(32); text('AGRINHO 2026', width/2, 62);
-  fill(180,240,140); textSize(15); text('Agro forte, futuro sustentável', width/2, 92);
-  
-  let bW=210, bH=52, bGap=18, totalW=3*bW+2*bGap, bX0=(width-totalW)/2, bY=height/2+10;
-  let botoes = ['CAMPANHA', 'SANDBOX', 'PLANTAÇÃO'];
-  let descs = ['6 FASES NARRATIVAS', 'MODO LIVRE', 'SIMULAÇÃO AGRÍCOLA'];
-  for(let i=0;i<3;i++) {
-    let bx = bX0 + i*(bW+bGap);
-    let hover = (mouseX>bx && mouseX<bx+bW && mouseY>bY && mouseY<bY+bH);
-    fill(hover ? color(40,120,30) : color(15,55,12));
-    rect(bx, bY, bW, bH, 8);
-    fill(hover ? color(220,255,165) : color(160,220,100));
-    textSize(15); text(botoes[i], bx+bW/2, bY+bH/2);
-    textSize(10); fill(120,200,90); text(descs[i], bx+bW/2, bY+bH/2+17);
+  for (var y = 0; y < height; y++) { var t = y / height; stroke(lerp(8, 22, t), lerp(18, 58, t), lerp(8, 22, t)); line(0, y, width, y); }
+  for (var i = 0; i < menuStars.length; i++) { var s = menuStars[i]; noStroke(); fill(255, 255, 220, 80 + sin(frameCount * 0.04 + i) * 60); ellipse(s.x, s.y, s.r); }
+  menuCam = (menuCam || 0) + 0.3;
+  fill(22, 55, 18); beginShape(); vertex(0, height);
+  for (var x = 0; x <= width; x += 7) vertex(x, height * 0.62 + noise(x * 0.008 + menuCam * 0.001) * height * 0.06);
+  vertex(width, height); endShape(CLOSE);
+  fill(28, 80, 22); beginShape(); vertex(0, height);
+  for (var x = 0; x <= width; x += 6) vertex(x, height * 0.70 + noise(x * 0.012 + menuCam * 0.0008 + 10) * height * 0.06);
+  vertex(width, height); endShape(CLOSE);
+  desenharSol(width * 0.75, height * 0.18, 55);
+  for (var i = 0; i < nuvens.length; i++) { var n = nuvens[i]; n.x -= n.vel * 0.6; if (n.x < -n.w) n.x = width + n.w; desenhaNuvem(n.x, n.y, n.w, n.alpha, false); }
+  for (var i = 0; i < 5; i++) { var b = passaros[i]; b.x += b.vel * 0.8; b.fase += 0.06; if (b.x > width + 20) b.x = -20; noStroke(); stroke(18, 18, 28, 90); strokeWeight(1.2); var bat = sin(b.fase) * b.tam * 0.55; beginShape(); vertex(b.x - b.tam, b.y + bat); vertex(b.x, b.y); vertex(b.x + b.tam, b.y + bat); endShape(); }
+  noStroke(); fill(0, 200); rect(width / 2 - 310, 30, 620, 90, 12);
+  fill(255, 240, 100); textAlign(CENTER, CENTER); textFont('Georgia'); textStyle(BOLD); textSize(32); text('AGRINHO 2026', width / 2, 62);
+  fill(180, 240, 140); textSize(15); textStyle(NORMAL); text('Agro forte, futuro sustentável', width / 2, 92);
+  var bW = 210, bH = 52, bGap = 18, totalW = 3 * bW + 2 * bGap, bX0 = (width - totalW) / 2, bY = height / 2 + 10;
+  for (var i = 0; i < 3; i++) {
+    var bx = bX0 + i * (bW + bGap), hover = (mouseX > bx && mouseX < bx + bW && mouseY > bY && mouseY < bY + bH);
+    noStroke(); fill(hover ? color(40, 120, 30, 235) : color(15, 55, 12, 210));
+    if (hover) { stroke(100, 220, 80); strokeWeight(2); } else { stroke(50, 120, 40); strokeWeight(1); }
+    rect(bx, bY, bW, bH, 8); noStroke();
+    fill(hover ? color(220, 255, 165) : color(160, 220, 100)); textFont('Courier New'); textStyle(BOLD); textSize(15); textAlign(CENTER, CENTER);
+    text(OPCOES_MENU[i], bx + bW / 2, bY + bH / 2);
+    textStyle(NORMAL); textSize(10); fill(120, 200, 90, 180);
+    var desc = ['6 FASES NARRATIVAS', 'MODO LIVRE', 'SIMULAÇÃO AGRÍCOLA'][i];
+    text(desc, bx + bW / 2, bY + bH / 2 + 17);
+    if (hover) menuHover = i;
   }
-  fill(80,140,60,140); textSize(9); text('[R] Trailer | Clique para selecionar', width/2, height-32);
+  if (!(mouseX > bX0 && mouseX < bX0 + totalW && mouseY > bY && mouseY < bY + bH + 10)) menuHover = -1;
+  fill(80, 140, 60, 140); textFont('Courier New'); textSize(9); textAlign(CENTER, BOTTOM);
+  text('[R] Rever Trailer  |  Clique para selecionar modo', width / 2, height - 32);
+  textAlign(LEFT, TOP); textStyle(NORMAL);
 }
 
-function rodapeCreditos() { fill(80,80,80,180); textSize(10); textAlign(RIGHT,BOTTOM); text('© Agrinho 2026', width-10, height-6); textAlign(CENTER,CENTER); }
-function desenharCubo(cx,cy,t,ang) {}
-function desenharSol(sx,sy,raio) {}
-function desenhaNuvem(x,y,w,al,pesada) {}
-function desenhaTrator(x,y,esc) {}
-function bordaEscura() {}
+let menuCam = 0;
+
+function rodapeCreditos() {
+  push(); textAlign(RIGHT, BOTTOM); textFont('Arial'); textSize(10); fill(80, 80, 80, 180); noStroke();
+  text('© Agrinho 2026 — Todos os direitos reservados.', width - 10, height - 6); pop();
+}
+
+function desenharCubo(cx, cy, t, ang) {
+  var v = [{ x: -t, y: -t, z: -t }, { x: t, y: -t, z: -t }, { x: t, y: t, z: -t }, { x: -t, y: t, z: -t }, { x: -t, y: -t, z: t }, { x: t, y: -t, z: t }, { x: t, y: t, z: t }, { x: -t, y: t, z: t }];
+  var p2 = []; for (var i = 0; i < v.length; i++) { var x1 = v[i].x * cos(ang) - v[i].z * sin(ang); var z1 = v[i].x * sin(ang) + v[i].z * cos(ang); var y2 = v[i].y * cos(0.4) - z1 * sin(0.4); p2.push({ x: cx + x1, y: cy + y2 }); }
+  for (var i = 0; i < 4; i++) { line(p2[i].x, p2[i].y, p2[(i + 1) % 4].x, p2[(i + 1) % 4].y); line(p2[i + 4].x, p2[i + 4].y, p2[((i + 1) % 4) + 4].x, p2[((i + 1) % 4) + 4].y); line(p2[i].x, p2[i].y, p2[i + 4].x, p2[i + 4].y); }
+}
+
+// ═════════════════════════════════════════════════════════════
+// SOL MELHORADO
+// ═════════════════════════════════════════════════════════════
+function desenharSol(sx, sy, raio) {
+  noStroke();
+  for (var r = raio * 3.5; r > raio * 1.8; r -= 3) {
+    var a = map(r, raio * 1.8, raio * 3.5, 80, 0);
+    fill(255, 240, 120, a); ellipse(sx, sy, r * 2, r * 2);
+  }
+  var numRaios = 18;
+  for (var i = 0; i < numRaios; i++) {
+    var ang = TWO_PI / numRaios * i + frameCount * 0.004;
+    var r1 = raio * 1.3, r2 = raio * (2.0 + sin(frameCount * 0.03 + i) * 0.3);
+    var al = 40 + sin(frameCount * 0.05 + i * 0.7) * 20;
+    stroke(255, 248, 180, al); strokeWeight(2 + sin(frameCount * 0.05 + i) * 1);
+    line(sx + cos(ang) * r1, sy + sin(ang) * r1, sx + cos(ang) * r2, sy + sin(ang) * r2);
+  }
+  noStroke();
+  for (var r = raio * 1.6; r > raio * 1.1; r -= 2) {
+    var a2 = map(r, raio * 1.1, raio * 1.6, 120, 0);
+    fill(255, 232, 100, a2); ellipse(sx, sy, r * 2, r * 2);
+  }
+  fill(255, 255, 220); ellipse(sx, sy, raio * 2, raio * 2);
+  fill(255, 255, 255, 180); ellipse(sx, sy, raio * 1.3, raio * 1.3);
+  fill(255, 255, 240); ellipse(sx, sy, raio * 0.6, raio * 0.6);
+}
 
 // ═════════════════════════════════════════════════════════════
 // ROTEADOR
 // ═════════════════════════════════════════════════════════════
 function rodarJogoPrincipal() {
-  if(trailerAtivo) { executarTrailer(); return; }
-  if(plantActive) { executarPlantacao(); return; }
-  if(sandboxActive) { executarSandbox(); return; }
-  if(campaignActive) { executarCampanha(); return; }
+  if (trailerAtivo) { executarTrailer(); return; }
+  if (plantActive) { executarPlantacao(); return; }
+  if (sandboxActive) { executarSandbox(); return; }
+  if (campaignActive) { executarCampanha(); return; }
+  executarMenuJogo();
+}
+
+// ═════════════════════════════════════════════════════════════
+// MENU JOGO
+// ═════════════════════════════════════════════════════════════
+function executarMenuJogo() {
   desenharMenuPrincipal();
 }
 
+// ═════════════════════════════════════════════════════════════
+// TRAILER
+// ═════════════════════════════════════════════════════════════
 function executarTrailer() {
-  trailerFrame++;
-  background(0);
-  fill(255); textSize(30); text('AGRINHO 2026', width/2, height/2);
-  textSize(14); text('Agro forte, futuro sustentável', width/2, height/2+40);
-  if(trailerFrame>180 || keyIsPressed) { trailerAtivo=false; trailerFrame=0; }
+  trailerFrame++; musicUpdate();
+  if (trailerFrame <= 480) { cam1 += 1.6; cena1(); }
+  else if (trailerFrame <= 720) { cena1b(); }
+  else if (trailerFrame <= 1140) { cam2 += 1.1; cena2(); }
+  else if (trailerFrame <= 1380) { cam2b += 0.45; cena2b(); }
+  else if (trailerFrame <= 1860) { cena3(); }
+  else if (trailerFrame <= 2160) { cena4(); }
+  else if (trailerFrame <= 2460) { cena4b(); }
+  else if (trailerFrame <= 2760) { cena5(); }
+  else { finalizarTrailer(); return; }
+  hudTrailer();
+  desenharFade();
+  if (trailerFrame > 90) {
+    noStroke(); fill(255, 32); textFont('Courier New'); textStyle(NORMAL); textAlign(RIGHT, BOTTOM); textSize(10);
+    text('[ESPAÇO] Pular', width - 14, height - 10);
+  }
 }
 
-// ═════════════════════════════════════════════════════════════
-// CAMPANHA (CARREIRA) 2D
-// ═════════════════════════════════════════════════════════════
-let cameraX2 = 0, cameraY2 = 0;
-const TAMANHO_CELULA = 28;
+function hudTrailer() {
+  noFill(); stroke(80, 220, 80, 35); strokeWeight(1);
+  for (var gx = 0; gx <= width; gx += 55) line(gx, 0, gx, height);
+  for (var gy = 0; gy <= height; gy += 45) line(0, gy, width, gy);
+  stroke(80, 220, 80, 80); strokeWeight(1.5);
+  var cs = 18;
+  line(0, 0, cs, 0); line(0, 0, 0, cs);
+  line(width - cs, 0, width, 0); line(width, 0, width, cs);
+  line(0, height - cs, 0, height); line(0, height, cs, height);
+  line(width - cs, height, width, height); line(width, height - cs, width, height);
+  noStroke(); fill(0, 110); rect(10, 10, 220, 28, 3);
+  fill(80, 220, 80); textFont('Courier New'); textAlign(LEFT, CENTER); textSize(9); textStyle(NORMAL);
+  var minutos = floor(trailerFrame / 60), segundos = floor(trailerFrame % 60);
+  text('◉ AGRINHO 2026  ' + nf(minutos, 2) + ':' + nf(segundos, 2), 18, 24);
+  fill(0, 110); rect(width - 190, 10, 180, 28, 3);
+  fill(80, 200, 80); textAlign(RIGHT, CENTER); textSize(9);
+  text('DRONE ▸ MODO GRAVAÇÃO', width - 18, 24);
+  noStroke(); textAlign(LEFT, TOP); textStyle(NORMAL);
+}
 
+function desenharFade() {
+  var cortes = [458, 698, 1118, 1358, 1838, 2138, 2438, 2738];
+  var M = 22, alpha = 0;
+  for (var i = 0; i < cortes.length; i++) {
+    var t = cortes[i];
+    if (trailerFrame >= t - M && trailerFrame < t) { alpha = map(trailerFrame, t - M, t, 0, 255); break; }
+    if (trailerFrame >= t && trailerFrame < t + M) { alpha = map(trailerFrame, t, t + M, 255, 0); break; }
+  }
+  if (alpha > 0) { noStroke(); fill(0, alpha); rect(0, 0, width, height); }
+}
+
+function finalizarTrailer() {
+  trailerAtivo = false; trailerFrame = 0; cam1 = 0; cam2 = 0; cam2b = 0;
+  pararMusicaTrailer();
+  try { localStorage.setItem('agrinho2026_trailer', '1'); } catch (e) { }
+}
+
+// ─── CENA 1 — Panorama aéreo de campo ────────────────────────
+function cena1() {
+  var bank = sin(cam1 * 0.018) * 0.026;
+  var horizLift = cos(cam1 * 0.011) * 5;
+  var HORZ = 170 + horizLift;
+  noStroke();
+  for (var y = 0; y < HORZ + 8; y++) {
+    var t = map(y, 0, HORZ, 0, 1);
+    stroke(lerp(162, 215, t), lerp(185, 225, t), lerp(205, 235, t)); line(0, y, width, y);
+  }
+  noStroke();
+  desenharSol(width * 0.76, HORZ * 0.38, 38);
+  for (var i = 0; i < 12; i++) {
+    var cx = (i * 72 + cam1 * 0.08) % (width + 140) - 70;
+    var cy = 18 + noise(i * 2.1) * 55;
+    var cw = 100 + noise(i * 1.5) * 140;
+    desenhaNuvem(cx, cy, cw, 185 + noise(i) * 40, false);
+  }
+  var mts = [{ off: 0, esc: 0.0025, amp: 52, base: 142, r: 122, g: 138, b: 150, a: 140 }, { off: 80, esc: 0.0035, amp: 36, base: 150, r: 145, g: 160, b: 168, a: 115 }, { off: 180, esc: 0.005, amp: 22, base: 158, r: 172, g: 182, b: 190, a: 88 }];
+  for (var mi = 0; mi < mts.length; mi++) {
+    var m = mts[mi]; fill(m.r, m.g, m.b, m.a); beginShape(); vertex(0, height);
+    for (var x = 0; x <= width; x += 7) vertex(x, m.base + horizLift + noise(x * m.esc + m.off) * m.amp);
+    vertex(width, height); endShape(CLOSE);
+  }
+  push(); translate(width / 2, height / 2); rotate(bank); translate(-width / 2, -height / 2);
+  fill(24, 68, 18); rect(0, HORZ, width, height - HORZ);
+  for (var linha = 0; linha <= 64; linha++) {
+    var prof = linha / 64;
+    var yBase = map(pow(prof, 1.72), 0, 1, HORZ, height + 14);
+    if (yBase > height + 14) break;
+    var nv = noise(cam1 * 0.001 + linha * 0.07) * 60;
+    fill(12 + nv * 0.2, 120 + nv, 16 + nv * 0.15);
+    beginShape();
+    for (var x = -25; x <= width + 25; x += 9) { var xM = x + cam1; var o = sin(xM * 0.008 + linha * 0.52) * (2 + linha * 0.20) + noise(xM * 0.003, linha * 0.11) * (6 + linha * 0.45); vertex(x, yBase + o); }
+    for (var x = width + 25; x >= -25; x -= 9) { var xM = x + cam1; var o = sin(xM * 0.008 + linha * 0.52) * (2 + linha * 0.20) + noise(xM * 0.003, linha * 0.11) * (6 + linha * 0.45); vertex(x, yBase + o + (2 + prof * 18)); }
+    endShape(CLOSE);
+  }
+  pop();
+  for (var i = 0; i < passaros.length; i++) { var b = passaros[i]; b.x += b.vel; b.fase += 0.08; if (b.x > width + 20) b.x = -20; var bat = sin(b.fase) * b.tam * 0.55; stroke(18, 18, 28, 80); strokeWeight(1.2); noFill(); beginShape(); vertex(b.x - b.tam, b.y + bat); vertex(b.x, b.y); vertex(b.x + b.tam, b.y + bat); endShape(); noStroke(); }
+  bordaEscura();
+}
+
+// ─── CENA 1B — Grãos caindo + texto ──────────────────────────
+function cena1b() {
+  var f = trailerFrame - 480;
+  noStroke(); fill(18, 12, 8); rect(0, 0, width, height);
+  stroke(35, 28, 22, 50); strokeWeight(1); for (var y = 0; y < height; y += 30) line(0, y, width, y); for (var x = 0; x < width; x += 30) line(x, 0, x, height);
+  var pilhaY = map(f, 20, 240, height + 20, height * 0.38);
+  noStroke();
+  for (var y = int(pilhaY); y < height; y++) { var t = map(y, pilhaY, height, 0, 1); stroke(lerp(220, 168, t), lerp(152, 105, t), lerp(28, 18, t)); line(0, y, width, y); }
+  noStroke();
+  for (var gi = 0; gi < graos.length; gi++) {
+    var g = graos[gi];
+    if (g.ativo) { g.y += g.vy; g.x += g.vx + sin(g.y * 0.04) * 0.3; if (g.y > height * 0.85) g.ativo = false; }
+    if (g.y > -15 && g.y < height + 10) {
+      var ga = g.y < 0 ? map(g.y, -30, 0, 0, 230) : 230;
+      fill(200 + noise(gi) * 22, 138 + noise(gi * 2) * 22, 20 + noise(gi * 3) * 15, ga);
+      push(); translate(g.x, g.y); rotate(g.x * 0.04 + g.y * 0.01); ellipse(0, 0, g.r * 1.65, g.r); pop();
+    }
+  }
+  bordaEscura();
+  if (f > 52) {
+    var af = min((f - 52) * 5, 225);
+    noStroke(); fill(0, af * 0.62); rect(width * 0.08, height * 0.09, width * 0.84, 76, 6);
+    fill(240, 218, 142, af); textFont('Courier New'); textAlign(CENTER, CENTER); textStyle(BOLD); textSize(28);
+    text('A TERRA QUE NOS ALIMENTA', width / 2, height * 0.172);
+    textStyle(NORMAL); textSize(16); fill(202, 180, 110, af * 0.82);
+    text('O agronegócio é a espinha dorsal do Brasil', width / 2, height * 0.252);
+  }
+}
+
+// ─── CENA 2 — Floresta panorâmica ────────────────────────────
+function cena2() {
+  var f = trailerFrame - 720;
+  var pan = map(f, 0, 420, 90, -90);
+  noStroke();
+  for (var y = 0; y < 205; y++) { var t = map(y, 0, 205, 0, 1); stroke(lerp(50, 155, t), lerp(60, 162, t), lerp(74, 168, t)); line(0, y, width, y); }
+  for (var i = 0; i < nuvens.length; i++) { var n = nuvens[i]; n.x -= n.vel * 0.55; if (n.x < -n.w) n.x = width + n.w; desenhaNuvem(n.x + pan * 0.12, n.y, n.w, 108, true); }
+  var panedX = pan * 0.65;
+  fill(42, 68, 35); beginShape(); vertex(-15, height);
+  for (var x = -15; x <= width + 15; x += 6) vertex(x, 165 + pan * 0.04 + noise(x * 0.005 + 200) * 34);
+  vertex(width + 15, height); endShape(CLOSE);
+  fill(22, 42, 18, 210);
+  for (var i = 0; i < 24; i++) {
+    var ax = noise(i * 4.1) * (width * 0.9) + panedX * 0.4;
+    var ah = 60 + noise(i * 2.8) * 95;
+    var aw = 16 + noise(i * 1.3) * 22;
+    if (ax > 0 && ax < width) {
+      beginShape(); vertex(ax, height * 0.68); vertex(ax - aw, height * 0.68);
+      vertex(ax - aw * 0.3, height * 0.68 - ah); vertex(ax + aw * 0.3, height * 0.68 - ah);
+      vertex(ax + aw, height * 0.68); endShape(CLOSE);
+    }
+  }
+  bordaEscura();
+  var af = min((trailerFrame - 720) * 4, 160);
+  noStroke(); fill(0, af * 0.62); rect(12, 12, 210, 44, 4);
+  fill(80, 220, 80, af); textFont('Courier New'); textAlign(LEFT, CENTER); textStyle(NORMAL); textSize(10);
+  text('ALT: 125m  |  FLORESTA', 20, 27);
+  text('ZONA DE PRESERVAÇÃO PERMANENTE', 20, 43);
+  if (f > 200) {
+    var a2 = min((f - 200) * 5, 200);
+    noStroke(); fill(0, a2 * 0.65); rect(width * 0.08, height * 0.78, width * 0.84, 52, 6);
+    fill(80, 220, 100, a2); textAlign(CENTER, CENTER); textStyle(BOLD); textSize(20);
+    text('DESMATAMENTO AMEAÇA 9,5 MILHÕES DE HECTARES', width / 2, height * 0.82); textStyle(NORMAL);
+  }
+}
+
+// ─── CENA 2B — Vista satélite com gado ───────────────────────
+function cena2b() {
+  var drift = sin(cam2b * 0.022) * 8;
+  noStroke();
+  for (var y = 0; y < height; y++) { var t = map(y, 0, height, 0, 1); stroke(lerp(22, 58, t), lerp(72, 128, t), lerp(18, 40, t)); line(0, y, width, y); }
+  noStroke(); for (var i = 0; i < 180; i++) { var gx = noise(i * 3.1, cam2b * 0.002) * width; var gy = noise(i * 2.7, cam2b * 0.003) * height; fill(18, 55, 14, 50); ellipse(gx + drift, gy + drift * 0.4, 8 + noise(i) * 12, 4 + noise(i * 2) * 6); }
+  stroke(198, 194, 184, 165); strokeWeight(2); line(0, height * 0.36, width, height * 0.36); line(width * 0.49, 0, width * 0.49, height); strokeWeight(1.5); line(0, height * 0.69, width, height * 0.69);
+  noStroke(); fill(178, 168, 142); for (var x = 0; x < width; x += 44) { ellipse(x, height * 0.36, 5, 5); ellipse(x, height * 0.69, 5, 5); } for (var y = 0; y < height; y += 44) ellipse(width * 0.49, y, 5, 5);
+  for (var bi = 0; bi < bovinos.length; bi++) {
+    var bov = bovinos[bi]; bov.x += cos(bov.ang) * bov.vel + drift * 0.015; bov.y += sin(bov.ang) * bov.vel; bov.ang += random(-0.04, 0.04);
+    bov.x = constrain(bov.x, 22, width - 22); bov.y = constrain(bov.y, 22, height - 22);
+    noStroke(); fill(0, 36); ellipse(bov.x + 4, bov.y + 4, bov.tam * 1.8, bov.tam);
+    var cr = bov.tipo === 0 ? 35 : bov.tipo === 1 ? 108 : 196;
+    var cg = bov.tipo === 0 ? 30 : bov.tipo === 1 ? 68 : 186;
+    var cb2 = bov.tipo === 0 ? 28 : bov.tipo === 1 ? 32 : 172;
+    fill(cr, cg, cb2); push(); translate(bov.x, bov.y); rotate(bov.ang); ellipse(0, 0, bov.tam * 1.8, bov.tam); fill(cr - 14, cg - 14, cb2 - 14); ellipse(bov.tam * 0.68, 0, bov.tam * 0.58, bov.tam * 0.46); pop();
+  }
+  bordaEscura();
+  var af = min((trailerFrame - 1140) * 4, 160);
+  noStroke(); fill(0, af * 0.62); rect(12, 12, 215, 46, 4);
+  fill(118, 218, 108, af); textFont('Courier New'); textAlign(LEFT, CENTER); textStyle(NORMAL); textSize(10);
+  text('ALT: 82m  ▼  MODO SATÉLITE', 22, 28); text('PECUÁRIA — ZONA DE PASTAGEM', 22, 44);
+}
+
+// ─── CENA 3 — Problemas ambientais ───────────────────────────
+function cena3() {
+  var f = trailerFrame - 1380;
+  noStroke(); fill(8, 5, 3); rect(0, 0, width, height);
+  for (var i = 0; i < 28; i++) { fill(255, 3); rect(0, (i * 20 + f * 0.18) % height, width, 1); }
+  var idx = f < 200 ? 0 : f < 400 ? 1 : 2;
+  var fLocal = f < 200 ? f : f < 400 ? f - 200 : f - 400;
+  var prob = PROBLEMAS[idx];
+  var al = fLocal < 30 ? map(fLocal, 0, 30, 0, 255) : fLocal > 165 ? map(fLocal, 165, 200, 255, 0) : 255;
+  var pr = prob.r, pg = prob.g, pb2 = prob.b;
+  noStroke(); fill(pr, pg, pb2, al); rect(width * 0.07, height * 0.22, 5, height * 0.56);
+  textFont('Courier New'); textAlign(LEFT, CENTER); textStyle(NORMAL); textSize(14); fill(pr, pg, pb2, al * 0.88);
+  text('PROBLEMA ' + (idx + 1) + ' / 3  —  ' + prob.sub, width * 0.12, height * 0.28);
+  stroke(pr, pg, pb2, al * 0.4); strokeWeight(1); line(width * 0.12, height * 0.345, width * 0.90, height * 0.345);
+  noStroke(); textAlign(CENTER, CENTER); textStyle(BOLD); textSize(56); fill(0, al * 0.72); text(prob.titulo, width / 2 + 3, height * 0.50 + 3); fill(245, 232, 205, al); text(prob.titulo, width / 2, height * 0.50);
+  noStroke(); fill(0, al * 0.60); rect(width * 0.09, height * 0.600, width * 0.82, 88, 6);
+  textStyle(NORMAL); textSize(21); fill(215, 198, 162, al * 0.92); text(prob.l1, width / 2, height * 0.646);
+  textSize(18); fill(188, 172, 138, al * 0.82); text(prob.l2, width / 2, height * 0.726);
+  var pulse = sin(f * 0.13) * 9; noFill(); stroke(pr, pg, pb2, al * 0.22); strokeWeight(1.5); ellipse(width / 2, height * 0.50, 348 + pulse, 94 + pulse); noStroke(); textStyle(NORMAL);
+}
+
+// ─── CENA 4 — Incêndio / destruição ──────────────────────────
+function cena4() {
+  var f = trailerFrame - 1860;
+  var shk = sin(f * 0.8) * 1.5;
+  noStroke();
+  for (var y = 0; y < height; y++) { var t = map(y, 0, height, 0, 1); stroke(lerp(5, 100, t), lerp(3, 27, t), lerp(7, 10, t)); line(0, y, width, y); }
+  for (var layer = 0; layer < 3; layer++) {
+    for (var i = 0; i < 38; i++) { var px = ((i * 52 + f * (0.8 + layer * 0.28) + layer * 80) % (width + 42)); var py = 30 + noise(i * 0.35 + layer * 10, f * 0.008 + layer * 5) * 192; fill(28 + layer * 7, 22 + layer * 5, 18 + layer * 4, 22 + noise(i, f * 0.01) * 33); noStroke(); ellipse(px, py, 40 + noise(i * 1.6) * 44); }
+  }
+  for (var x = 0; x < width; x += 18) {
+    var flH = 22 + noise(x * 0.04, f * 0.04) * 55;
+    fill(220 + noise(x, f * 0.05) * 28, 60 + noise(x * 2, f * 0.06) * 48, 10, 175);
+    beginShape(); vertex(x - 6, height * 0.70 + shk); vertex(x, height * 0.70 - flH + shk); vertex(x + 6, height * 0.70 + shk); endShape(CLOSE);
+    fill(255, 200, 30, 95); noStroke(); ellipse(x, height * 0.70 - flH * 0.3 + shk, 7, flH * 0.48);
+  }
+  fill(6, 4, 3);
+  for (var i = 0; i < 18; i++) { var sx = i * 52 - 14 + shk * 0.3; var sw = 11 + noise(i * 1.7) * 26; var sh2 = 50 + noise(i * 2.6) * 115; noStroke(); rect(sx, height * 0.70 - sh2, sw, sh2); if (noise(i * 0.88) > 0.38) rect(sx + sw * 0.20, height * 0.70 - sh2 - 34, sw * 0.24, 34); }
+  fill(18, 9, 4); rect(0, height * 0.70, width, height * 0.30);
+  noStroke(); for (var bi = 0; bi < brasas.length; bi++) { var br = brasas[bi]; br.y += br.vy; if (br.y < -5) { br.y = height + 5; br.x = random(width); } fill(235, 85 + noise(br.x, br.y) * 78, 18, br.a * map(br.y, height, 0, 1, 0.2)); ellipse(br.x + shk * 0.2, br.y, br.t); }
+  bordaEscura();
+  if (f > 22) { var a1 = min((f - 22) * 5, 195); noStroke(); fill(0, a1 * 0.66); rect(width * 0.08, height * 0.155, width * 0.84, 38, 4); fill(178, 148, 98, a1); textFont('Courier New'); textAlign(CENTER, CENTER); textStyle(NORMAL); textSize(17); text('O PREÇO DO PROGRESSO DESORDENADO...', width / 2, height * 0.186); }
+  if (f > 75) { var a2 = min((f - 75) * 5, 255); noStroke(); fill(0, a2 * 0.68); rect(width * 0.08, height * 0.324, width * 0.84, 54, 4); fill(225, 68, 42, a2); textStyle(BOLD); textSize(34); text('É A NATUREZA EM COLAPSO', width / 2, height * 0.363); textStyle(NORMAL); }
+  if (f > 128) { var a3 = min((f - 128) * 4, 180); noStroke(); fill(0, a3 * 0.60); rect(width * 0.08, height * 0.520, width * 0.84, 38, 4); fill(80, 220, 255, a3); textSize(16); text('MAS JUNTOS PODEMOS MUDAR ESSE FUTURO', width / 2, height * 0.543); }
+  textStyle(NORMAL);
+}
+
+// ─── CENA 4B — Preview dos modos de jogo ─────────────────────
+function cena4b() {
+  var f = trailerFrame - 2160;
+  var mini = floor(f / 50) % 6;
+  var fl = f % 50;
+  var flashAlpha = fl < 5 ? map(fl, 0, 5, 220, 0) : 0;
+  if (mini === 0) cenaFazendaDia(fl);
+  else if (mini === 1) cenaLavouraCrescendo(fl);
+  else if (mini === 2) cenaColheita(fl);
+  else if (mini === 3) cenaMercadoVerde(fl);
+  else if (mini === 4) cenaTempestade(fl);
+  else cenaConquista(fl);
+  noStroke(); fill(0, 145); rect(0, 0, width, 32); fill(0, 110); rect(0, height - 32, width, 32);
+  fill(92, 192, 82); textFont('Courier New'); textAlign(LEFT, CENTER); textStyle(BOLD); textSize(12); text('$ ' + (8200 + mini * 1340 + fl * 8), 14, 16);
+  var estacoes = ['LAVOURA', 'CRESCIMENTO', 'COLHEITA', 'MERCADO', 'TEMPESTADE', 'CONQUISTA'];
+  fill(210, 210, 210); textAlign(CENTER, CENTER); textSize(12); text(estacoes[mini], width / 2, 16);
+  fill(62, 132, 52); textAlign(RIGHT, CENTER); textSize(11); text('NÍVEL  3', width - 14, 16);
+  fill(255, 228, 80); textAlign(CENTER, CENTER); textStyle(BOLD); textSize(14);
+  text('AGRINHO 2026 — AGRO FORTE, FUTURO SUSTENTÁVEL', width / 2, height - 16);
+  textStyle(NORMAL);
+  if (flashAlpha > 0) { noStroke(); fill(255, flashAlpha); rect(0, 0, width, height); }
+  bordaEscura();
+}
+
+// ─── CENA 5 — Horizonte verde / encerramento ─────────────────
+function cena5() {
+  var f = trailerFrame - 2460;
+  noStroke();
+  for (var y = 0; y < height; y++) {
+    var t = y / height;
+    stroke(lerp(18, 82, t), lerp(55, 185, t), lerp(18, 52, t)); line(0, y, width, y);
+  }
+  desenharSol(width / 2, height * 0.30, 55 + sin(f * 0.02) * 8);
+  for (var i = 0; i < nuvens.length; i++) { var n = nuvens[i]; n.x -= n.vel * 0.3; if (n.x < -n.w) n.x = width + n.w; desenhaNuvem(n.x, n.y, n.w, 150, false); }
+  fill(22, 80, 28); beginShape(); vertex(0, height);
+  for (var x = 0; x <= width; x += 6) vertex(x, height * 0.65 + noise(x * 0.008, f * 0.002) * height * 0.06);
+  vertex(width, height); endShape(CLOSE);
+  fill(32, 110, 36); beginShape(); vertex(0, height);
+  for (var x = 0; x <= width; x += 5) vertex(x, height * 0.72 + noise(x * 0.01, f * 0.002 + 10) * height * 0.05);
+  vertex(width, height); endShape(CLOSE);
+  noStroke();
+  for (var i = 0; i < 40; i++) {
+    var px = noise(i * 3.1, f * 0.02) * width; var py = noise(i * 2.5, f * 0.015) * height;
+    var cols = [[255, 220, 60], [80, 255, 120], [60, 180, 255]][i % 3];
+    fill(cols[0], cols[1], cols[2], 100 + sin(f * 0.15 + i) * 70);
+    ellipse(px, py, 3 + noise(i) * 6);
+  }
+  bordaEscura();
+  if (f > 40) {
+    var a1 = min((f - 40) * 4, 255);
+    noStroke(); fill(0, a1 * 0.75); rect(width * 0.08, height * 0.12, width * 0.84, 110, 10);
+    fill(255, 240, 100, a1); textFont('Georgia'); textAlign(CENTER, CENTER); textStyle(BOLD); textSize(38);
+    text('AGRINHO 2026', width / 2, height * 0.24);
+    fill(180, 255, 140, a1); textSize(18); textStyle(NORMAL); textFont('Courier New');
+    text('Agro forte, futuro sustentável', width / 2, height * 0.34);
+    fill(255, 255, 255, a1 * 0.85); textSize(13);
+    text('Equilíbrio entre produção e meio ambiente', width / 2, height * 0.41);
+  }
+  if (f > 200) {
+    var a2 = min((f - 200) * 4, 200);
+    fill(80, 255, 80, a2); textFont('Courier New'); textSize(16); textStyle(BOLD);
+    text('[ PRESSIONE QUALQUER TECLA ]', width / 2, height * 0.85); textStyle(NORMAL);
+  }
+}
+
+// Mini-cenas internas da cena 4b
+function cenaFazendaDia(f) { for (var y = 0; y < height; y++) { stroke(lerp(55, 38, y / height), lerp(128, 148, y / height), lerp(22, 38, y / height)); line(0, y, width, y); } noStroke(); desenharSol(width * 0.80, height * 0.20, 40); fill(28, 80, 22); beginShape(); vertex(0, height); for (var x = 0; x <= width; x += 8) vertex(x, height * 0.62 + noise(x * 0.008 + f * 0.01) * 40); vertex(width, height); endShape(CLOSE); }
+function cenaLavouraCrescendo(f) { for (var y = 0; y < height; y++) { stroke(lerp(65, 28, y / height), lerp(145, 88, y / height), lerp(215, 155, y / height)); line(0, y, width, y); } noStroke(); for (var x = 0; x < width; x += 22) { var h = 40 + noise(x * 0.05, f * 0.02) * 60; fill(28 + noise(x) * 20, 120 + noise(x * 2) * 40, 22); rect(x, height - h, 14, h, 4, 4, 0, 0); fill(82, 182, 48, 180); ellipse(x + 7, height - h, 20, h * 0.6); } }
+function cenaColheita(f) { for (var y = 0; y < height; y++) { stroke(lerp(168, 78, y / height), lerp(120, 68, y / height), lerp(28, 18, y / height)); line(0, y, width, y); } noStroke(); fill(185, 142, 22); beginShape(); vertex(0, height); for (var x = 0; x <= width; x += 6) vertex(x, height * 0.55 + noise(x * 0.01, f * 0.015) * 55); vertex(width, height); endShape(CLOSE); fill(200, 162, 28); for (var i = 0; i < 20; i++) { ellipse(noise(i * 3) * width, noise(i * 2) * height * 0.6, 18 + noise(i * 1.5) * 22, 12 + noise(i * 2) * 14); } desenhaTrator(width * 0.5 + sin(f * 0.06) * 80, height * 0.72, 0.7); }
+function cenaMercadoVerde(f) { for (var y = 0; y < height; y++) { stroke(lerp(8, 22, y / height), lerp(12, 35, y / height), lerp(8, 18, y / height)); line(0, y, width, y); } noStroke(); for (var i = 0; i < 8; i++) { fill(38 + i * 6, 90 + i * 8, 28 + i * 4, 180); rect(i * 105 - 5, height * 0.45, 80 + noise(i) * 40, height * 0.55, 4, 4, 0, 0); } fill(120, 220, 80); textFont('Courier New'); textAlign(CENTER, CENTER); textStyle(BOLD); textSize(22); text('MERCADO VERDE', width / 2, height * 0.25); textStyle(NORMAL); fill(200, 255, 160); textSize(14); text('Certificação Sustentável', width / 2, height * 0.35); }
+function cenaTempestade(f) { for (var y = 0; y < height; y++) { stroke(lerp(8, 22, y / height), lerp(8, 22, y / height), lerp(12, 30, y / height)); line(0, y, width, y); } noStroke(); for (var i = 0; i < stormParts.length; i++) { var p = stormParts[i]; p.y += p.spd; if (p.y > height) { p.y = -p.len; p.x = random(width); } stroke(200, 220, 255, p.a); strokeWeight(1); line(p.x, p.y, p.x - 4, p.y + p.len); } if (random() < 0.02) { noStroke(); fill(255, 255, 255, 200); rect(0, 0, width, height); } fill(28, 80, 22); beginShape(); vertex(0, height); for (var x = 0; x <= width; x += 8) vertex(x, height * 0.68 + noise(x * 0.01, f * 0.02) * 30 + sin(f * 0.1) * 8); vertex(width, height); endShape(CLOSE); }
+function cenaConquista(f) { for (var y = 0; y < height; y++) { stroke(lerp(18, 55, y / height), lerp(55, 130, y / height), lerp(18, 48, y / height)); line(0, y, width, y); } noStroke(); desenharSol(width / 2, height * 0.20, 50 + sin(f * 0.08) * 10); for (var i = 0; i < 30; i++) { var px = noise(i * 3.1, f * 0.03) * width; var py = noise(i * 2.5, f * 0.025) * height; var cs2 = [[255, 220, 60], [80, 255, 120], [60, 180, 255]][i % 3]; fill(cs2[0], cs2[1], cs2[2], 120 + sin(f * 0.15 + i) * 80); ellipse(px, py, 4 + noise(i) * 8); } noStroke(); fill(0, 160); rect(width / 2 - 240, height * 0.72, 480, 60, 8); fill(120, 255, 120); textFont('Courier New'); textAlign(CENTER, CENTER); textStyle(BOLD); textSize(22); text('AGRO FORTE, FUTURO SUSTENTÁVEL!', width / 2, height * 0.756); textStyle(NORMAL); }
+
+// ═════════════════════════════════════════════════════════════
+// CAMPANHA
+// ═════════════════════════════════════════════════════════════
 function executarCampanha() {
-  switch(campaignState) {
+  switch (campaignState) {
     case 'levelSelect': desenharSelecionarFase(); break;
     case 'preCutscene': executarCutscene(); break;
     case 'gameplay': executarGameplay(); break;
@@ -334,429 +910,1587 @@ function executarCampanha() {
     case 'ending': executarEnding(); break;
   }
 }
-
-function desenharSelecionarFase() {
-  for(let y=0; y<height; y++) stroke(lerp(12,28,y/height), lerp(35,72,y/height), lerp(12,28,y/height)), line(0,y,width,y);
-  fill(0,200); rect(0,0,width,52);
-  fill(180,255,140); textSize(18); text('CAMPANHA — SELECIONE A FASE', width/2, 26);
-  let cols=3, bw=238, bh=105, gx=(width-cols*bw-(cols-1)*14)/2, gy=62;
-  for(let i=0;i<6;i++) {
-    let col=i%cols, row=floor(i/cols), bx=gx+col*(bw+14), by=gy+row*(bh+12);
-    let unlocked = phasesUnlocked[i];
-    let pd = PHASE_DATA[i];
-    fill(unlocked ? color(18,55,14) : color(10,22,10));
-    if(unlocked && mouseX>bx && mouseX<bx+bw && mouseY>by && mouseY<by+bh) fill(30,85,22);
-    rect(bx,by,bw,bh,8);
-    fill(pd.skyTop[0],pd.skyTop[1],pd.skyTop[2]); rect(bx+2,by+2,bw-4,35,6,6,0,0);
-    fill(unlocked?255:150); textSize(13); text(pd.name, bx+10, by+46);
-    fill(unlocked?200:100); textSize(10); text(pd.subtitle, bx+10, by+62);
-    if(!unlocked) { fill(255); textSize(18); text('🔒', bx+bw-25, by+bh/2); }
+function executarGameplay() {
+  atualizarPlayer2D();
+  atualizarNPCs2D();
+  if (phaseTimer > 0) phaseTimer--;
+  if (phaseTimer === 0 && !phaseWin) {
+    phaseWin = true;
+    if (currentPhase < 5) phasesUnlocked[currentPhase + 1] = true;
+    saveProgress();
   }
-  fill(0,160); rect(10,height-38,100,28,5);
-  fill(160,220,120); textSize(10); text('[ESC] VOLTAR', 60, height-24);
+  if (phaseWin) { campaignState = 'win'; return; }
+  renderizarCena2D();
+  desenharBracos2D();
+  desenharHUD2D();
+  desenharMiniMapa();
+  if (dialogActive) desenharDialogo();
+  if (pickupAnim > 0) { desenharPickupFx(); pickupAnim--; }
+}
+function desenharSelecionarFase() {
+  for (var y = 0; y < height; y++) { var t = y / height; stroke(lerp(12, 28, t), lerp(35, 72, t), lerp(12, 28, t)); line(0, y, width, y); }
+  noStroke(); desenharSol(width * 0.82, 60, 38);
+  noStroke(); fill(0, 200); rect(0, 0, width, 52);
+  fill(180, 255, 140); textFont('Courier New'); textAlign(CENTER, CENTER); textStyle(BOLD); textSize(18);
+  text('CAMPANHA — SELECIONE A FASE', width / 2, 26); textStyle(NORMAL);
+  var cols = 3, bw = 238, bh = 105, gx = (width - cols * bw - (cols - 1) * 14) / 2, gy = 62;
+  for (var i = 0; i < 6; i++) {
+    var col = i % cols, row = floor(i / cols);
+    var bx = gx + col * (bw + 14), by = gy + row * (bh + 12);
+    var unlocked = phasesUnlocked[i];
+    var pd = PHASE_DATA[i];
+    noStroke();
+    fill(unlocked ? color(18, 55, 14, 210) : color(10, 22, 10, 180));
+    if (unlocked && mouseX > bx && mouseX < bx + bw && mouseY > by && mouseY < by + bh) {
+      fill(30, 85, 22, 240); stroke(100, 220, 80); strokeWeight(2);
+    } else if (unlocked) { stroke(50, 130, 40, 160); strokeWeight(1); }
+    else { stroke(35, 35, 35, 100); strokeWeight(1); }
+    rect(bx, by, bw, bh, 8); noStroke();
+    fill(pd.skyTop[0], pd.skyTop[1], pd.skyTop[2]); rect(bx + 2, by + 2, bw - 4, 35, 6, 6, 0, 0);
+    fill(unlocked ? color(220, 255, 165) : color(80, 90, 70));
+    textFont('Courier New'); textStyle(BOLD); textSize(13); textAlign(LEFT, CENTER);
+    text(pd.name, bx + 10, by + 46);
+    textStyle(NORMAL); fill(unlocked ? color(160, 220, 110, 200) : color(60, 70, 55, 150)); textSize(10);
+    text(pd.subtitle, bx + 10, by + 62);
+    fill(unlocked ? color(100, 200, 80, 180) : color(50, 60, 50, 120)); textSize(9);
+    text('Ferramenta: ' + pd.tool, bx + 10, by + 78);
+    if (unlocked) { fill(80, 180, 60, 180); text('Objetivos: ' + pd.objTotal + (pd.hasTimer ? ' | TIMER' : ''), bx + 10, by + 92); }
+    if (!unlocked) { fill(80, 80, 60, 180); textSize(18); textAlign(CENTER, CENTER); text('🔒', bx + bw - 25, by + bh / 2); }
+  }
+  noStroke(); fill(0, 160); rect(10, height - 38, 100, 28, 5);
+  fill(160, 220, 120); textFont('Courier New'); textAlign(CENTER, CENTER); textSize(10);
+  text('[ESC] VOLTAR', 60, height - 24);
 }
 
 function iniciarFase(idx) {
   currentPhase = idx;
-  player.x = SPAWNS[idx][0]; player.y = SPAWNS[idx][1]; player.angle = SPAWNS[idx][2];
-  player.stamina = 100; player.health = 100;
-  let pd = PHASE_DATA[idx];
-  objTotal = pd.objTotal; objDone = 0; phaseWin = false;
+  var sp = SPAWNS[idx];
+  player.x = sp[0]; player.y = sp[1]; player.angle = sp[2]; player.pitch = 0;
+  player.stamina = 100; player.health = 100; player.bobTime = 0;
+  player.moving = false; player.running = false; player.crouching = false;
+  var pd = PHASE_DATA[idx];
+  objTotal = pd.objTotal; objDone = 0;
+  phaseWin = false;
   phaseTimer = pd.hasTimer ? pd.timerSec * 60 : -1;
-  dialogActive = false; dialogNPC = null; pickupAnim = 0;
-  
+  phaseTimerMax = phaseTimer;
+  dialogActive = false; dialogNPC = null; dialogLine = 0; interactCool = 0; pickupAnim = 0;
+  zBuf = new Float32Array(width);
+  windParts = []; for (var i = 0; i < 70; i++) windParts.push({ x: random(width), y: random(height), speed: random(2, 8), alpha: random(20, 90), len: random(15, 55), curveAmp: random(1, 4), t: random(TWO_PI) });
   activeNPCs = [];
-  for(let n of NPC_DATA[idx]) activeNPCs.push({ charIdx:n.c, x:n.x, y:n.y, dialogSet:n.d, walkAngle:random(TWO_PI), walkTimer:0, talking:false });
-  
+  var npcs = NPC_DATA[idx];
+  for (var i = 0; i < npcs.length; i++) activeNPCs.push({ charIdx: npcs[i].c, x: npcs[i].x, y: npcs[i].y, dialogSet: npcs[i].d, walkAngle: random(TWO_PI), walkTimer: 0, talking: false });
   spots = [];
-  for(let i=0;i<objTotal;i++) {
-    let x,y;
-    do { x = random(2,22); y = random(2,22); } while(MAPS[currentPhase][floor(y)][floor(x)] !== 0);
-    spots.push({ x:x, y:y, done:false });
-  }
-  
+  var map2 = MAPS[idx];
+  var available = [];
+  for (var gy2 = 1; gy2 < MAPSIZE - 1; gy2++) for (var gx = 1; gx < MAPSIZE - 1; gx++) if (map2[gy2][gx] === 0 || map2[gy2][gx] === 4) available.push({ x: gx + 0.5, y: gy2 + 0.5 });
+  for (var i = available.length - 1; i > 0; i--) { var j = floor(random(i + 1)); var tmp = available[i]; available[i] = available[j]; available[j] = tmp; }
+  for (var i = 0; i < min(objTotal, available.length); i++) spots.push({ x: available[i].x, y: available[i].y, done: false });
   initGameAudio();
   csIdx = 0; csFrame = 0;
   campaignState = 'preCutscene';
 }
 
-function avancarCutscene() { csIdx++; csFrame=0; if(csIdx>=CUTSCENE_DATA[currentPhase].length) { campaignState='gameplay'; if(cnvElt&&cnvElt.requestPointerLock) cnvElt.requestPointerLock(); } }
+function avancarCutscene() {
+  var sc = CUTSCENE_DATA[currentPhase];
+  csIdx++;
+  csFrame = 0;
+  if (csIdx >= sc.length) {
+    campaignState = 'gameplay';
+    if (cnvElt && cnvElt.requestPointerLock) cnvElt.requestPointerLock();
+  }
+}
 
 function executarCutscene() {
   csFrame++;
-  let sc = CUTSCENE_DATA[currentPhase];
-  if(csIdx>=sc.length) { campaignState='gameplay'; return; }
-  let cena = sc[csIdx], dur = cena[2], fadeAl = csFrame<40 ? map(csFrame,0,40,0,255) : csFrame>dur-40 ? map(csFrame,dur-40,dur,255,0) : 255;
-  background(0);
-  fill(0,fadeAl*0.9); rect(0,height-140,width,140);
-  fill(255,fadeAl); textSize(14); text(cena[0].toUpperCase(), 20, height-110);
-  fill(220,fadeAl); textSize(12); text(cena[1], 20, height-80);
-  fill(80,180,60,fadeAl); textSize(9); text('[ESPAÇO] '+(csIdx+1)+'/'+sc.length, width-12, height-8);
-  if(csFrame>=dur) avancarCutscene();
+  var sc = CUTSCENE_DATA[currentPhase];
+  if (csIdx >= sc.length) { campaignState = 'gameplay'; return; }
+  var cena2 = sc[csIdx];
+  var dur = cena2[2];
+  var fadeAl = csFrame < 40 ? map(csFrame, 0, 40, 0, 255) : csFrame > dur - 40 ? map(csFrame, dur - 40, dur, 255, 0) : 255;
+  desenharCutsceneBg(currentPhase, fadeAl);
+  var panH = 140;
+  noStroke(); fill(0, fadeAl * 0.9); rect(0, height - panH, width, panH);
+  stroke(60, 160, 50, fadeAl * 0.5); strokeWeight(1); line(0, height - panH, width, height - panH); noStroke();
+  var key = cena2[0];
+  desenharRetratoCompleto(key, 55, height - panH / 2, fadeAl);
+  var ni = getNomeInfo(key);
+  fill(ni.r, ni.g, ni.b, fadeAl); textFont('Courier New'); textStyle(BOLD); textSize(12); textAlign(LEFT, CENTER);
+  text(ni.nome, 105, height - panH + 18);
+  var totalChars = floor(map(csFrame, 0, min(dur, 120), 0, cena2[1].length, true));
+  var texto = cena2[1].substring(0, totalChars);
+  textStyle(NORMAL); fill(235, 228, 212, fadeAl); textSize(13); textAlign(LEFT, TOP);
+  var palavras = texto.split(' '); var linha = ''; var linhas = [];
+  for (var i = 0; i < palavras.length; i++) { var te = linha + (linha === '' ? '' : ' ') + palavras[i]; if (textWidth(te) > width - 118) { linhas.push(linha); linha = palavras[i]; } else linha = te; } linhas.push(linha);
+  for (var i = 0; i < min(linhas.length, 4); i++) text(linhas[i], 105, height - panH + 36 + i * 22);
+  fill(80, 180, 60, fadeAl); textSize(9); textAlign(RIGHT, BOTTOM); textStyle(NORMAL);
+  text('[ESPAÇO/CLIQUE] ' + (csIdx + 1) + '/' + sc.length, width - 12, height - 8);
+  noStroke(); fill(30, 80, 25); rect(0, height - 3, width, 3);
+  fill(80, 200, 60); rect(0, height - 3, width * (csIdx / sc.length), 3);
+  if (csFrame >= dur) avancarCutscene();
 }
 
-function executarGameplay() {
-  atualizarPlayer2D();
-  atualizarNPCs2D();
-  if(phaseTimer>0) phaseTimer--;
-  if(phaseTimer===0 && !phaseWin) {
-    phaseWin = true;
-    if(currentPhase<5) phasesUnlocked[currentPhase+1] = true;
-    saveProgress();
+function desenharCutsceneBg(phaseIdx, alpha) {
+  var pd = PHASE_DATA[phaseIdx];
+  var t = frameCount * 0.001;
+  for (var y = 0; y < height * 0.55; y++) {
+    var yT = y / (height * 0.55); stroke(lerp(pd.skyTop[0], pd.skyBot[0], yT), lerp(pd.skyTop[1], pd.skyBot[1], yT), lerp(pd.skyTop[2], pd.skyBot[2], yT)); line(0, y, width, y);
   }
-  if(phaseWin) { campaignState='win'; return; }
-  renderizarCena2D();
-  desenharBracos2D();
-  desenharHUD2D();
-  desenharMiniMapa();
-  if(dialogActive) desenharDialogo();
-  if(pickupAnim>0) { desenharPickupFx(); pickupAnim--; }
+  if (!pd.night) { noStroke(); desenharSol(width * 0.78, height * 0.15, 40); }
+  noStroke();
+  for (var y = int(height * 0.55); y < height; y++) {
+    var yT = (y - height * 0.55) / (height * 0.45);
+    stroke(lerp(pd.floorTop[0], pd.floorBot[0], yT), lerp(pd.floorTop[1], pd.floorBot[1], yT), lerp(pd.floorTop[2], pd.floorBot[2], yT)); line(0, y, width, y);
+  }
+  noStroke(); fill(pd.wallR * 0.3, pd.wallG * 0.3, pd.wallB * 0.3, 120);
+  beginShape(); vertex(0, height);
+  for (var x = 0; x <= width; x += 8) vertex(x, height * 0.58 + noise(x * 0.01 + t) * height * 0.08);
+  vertex(width, height); endShape(CLOSE);
+  bordaEscura();
 }
 
+function getNomeInfo(key) {
+  var nomes = {
+    'narrador': { nome: 'NARRADOR', r: 200, g: 200, b: 180 },
+    'juca': { nome: 'SEU JUCA', r: 220, g: 80, b: 80 },
+    'marina': { nome: 'MARINA', r: 80, g: 200, b: 100 },
+    'pedro': { nome: 'PEDRO', r: 180, g: 180, b: 220 },
+    'conceicao': { nome: 'D. CONCEIÇÃO', r: 240, g: 195, b: 60 },
+    'tonho': { nome: 'TONHO', r: 140, g: 140, b: 155 },
+    'biu': { nome: 'BIU', r: 80, g: 180, b: 80 },
+    'lena': { nome: 'LENA', r: 255, g: 255, b: 180 },
+    'costa': { nome: 'DR. COSTA', r: 220, g: 220, b: 240 },
+    'ana': { nome: 'ANA', r: 200, g: 100, b: 220 },
+    'clara': { nome: 'PROF. CLARA', r: 100, g: 160, b: 240 },
+    'tico': { nome: '[TICO]', r: 120, g: 240, b: 120 }
+  };
+  return nomes[key] || { nome: key.toUpperCase(), r: 200, g: 200, b: 200 };
+}
+
+function charKeyToIdx(key) {
+  var m = { juca: 0, marina: 1, pedro: 2, conceicao: 3, tonho: 4, biu: 5, lena: 6, costa: 7, ana: 8, clara: 9 };
+  return m[key] != null ? m[key] : -1;
+}
+
+function desenharRetratoCompleto(key, cx, cy, alpha) {
+  var idx = charKeyToIdx(key);
+  if (idx < 0) {
+    noStroke(); fill(40, 40, 40, alpha * 0.8); ellipse(cx, cy, 64, 72);
+    fill(180, 180, 160, alpha); textFont('Courier New'); textSize(10); textAlign(CENTER, CENTER); text('★', cx, cy);
+    return;
+  }
+  var ch = CHARS[idx];
+  var w2 = 52, h2 = 68;
+  noStroke(); fill(0, alpha * 0.7); rect(cx - w2 / 2 - 3, cy - h2 / 2 - 3, w2 + 6, h2 + 6, 6);
+  fill(30, 40, 28, alpha * 0.9); rect(cx - w2 / 2, cy - h2 / 2, w2, h2, 4);
+  stroke(80, 160, 60, alpha * 0.5); strokeWeight(1); noFill(); rect(cx - w2 / 2, cy - h2 / 2, w2, h2, 4); noStroke();
+  fill(ch.skinR, ch.skinG, ch.skinB, alpha); ellipse(cx, cy - 12, 22, 24);
+  fill(ch.hairR, ch.hairG, ch.hairB, alpha);
+  if (ch.hat) { fill(ch.shirtR * 0.6, ch.shirtG * 0.6, ch.shirtB * 0.6, alpha); rect(cx - 13, cy - 26, 26, 10, 3, 3, 0, 0); fill(ch.shirtR * 0.7, ch.shirtG * 0.7, ch.shirtB * 0.7, alpha); rect(cx - 10, cy - 30, 20, 6, 2); }
+  else { ellipse(cx, cy - 22, 24, 14); arc(cx - 10, cy - 18, 6, 12, PI, TWO_PI); arc(cx + 10, cy - 18, 6, 12, PI, TWO_PI); }
+  fill(30, 20, 10, alpha); ellipse(cx - 5, cy - 13, 4, 4); ellipse(cx + 5, cy - 13, 4, 4);
+  fill(255, 255, 255, alpha * 0.8); ellipse(cx - 4, cy - 14, 2, 2); ellipse(cx + 6, cy - 14, 2, 2);
+  if (ch.coat) { fill(ch.shirtR, ch.shirtG, ch.shirtB, alpha); rect(cx - 13, cy, 26, 22, 2); fill(20, 20, 30, alpha * 0.7); rect(cx - 2, cy, 4, 22); }
+  else { fill(ch.shirtR, ch.shirtG, ch.shirtB, alpha); rect(cx - 12, cy, 24, 20, 2); }
+  fill(ch.skinR, ch.skinG, ch.skinB, alpha); rect(cx - 18, cy + 1, 8, 16, 3); rect(cx + 10, cy + 1, 8, 16, 3);
+  fill(ch.pantR, ch.pantG, ch.pantB, alpha); rect(cx - 12, cy + 20, 10, 18, 2); rect(cx + 2, cy + 20, 10, 18, 2);
+}
+
+// ═════════════════════════════════════════════════════════════
+// GAMEPLAY — CAMPANHA
+// ═════════════════════════════════════════════════════════════
+// ============================================================
+// FUNÇÕES 2D QUE ESTAVAM FALTANDO
+// ============================================================
+
+function verificarInteracao2D() {
+  // Verifica NPCs
+  for (var i = 0; i < activeNPCs.length; i++) {
+    var npc = activeNPCs[i];
+    if (dist(player.x, player.y, npc.x, npc.y) < 2.4) {
+      dialogActive = true;
+      dialogNPC = npc;
+      dialogLine = 0;
+      npc.talking = true;
+      playDialog();
+      return;
+    }
+  }
+  // Verifica objetivos (spots)
+  for (var i = 0; i < spots.length; i++) {
+    var sp = spots[i];
+    if (!sp.done && dist(player.x, player.y, sp.x, sp.y) < 1.8) {
+      sp.done = true;
+      objDone++;
+      pickupAnim = 45;
+      playPickup();
+      if (objDone >= objTotal) {
+        phaseWin = true;
+        if (currentPhase < 5) phasesUnlocked[currentPhase + 1] = true;
+        saveProgress();
+      }
+      return;
+    }
+  }
+}
+
+function atualizarNPCs2D() {
+  for (var i = 0; i < activeNPCs.length; i++) {
+    var npc = activeNPCs[i];
+    npc.walkTimer++;
+    if (npc.walkTimer > 80 && !npc.talking) {
+      npc.walkAngle += random(-0.2, 0.2);
+      var dx = cos(npc.walkAngle) * 0.03;
+      var dy = sin(npc.walkAngle) * 0.03;
+      var nx = npc.x + dx;
+      var ny = npc.y + dy;
+      var map2 = MAPS[currentPhase];
+      var tileX = floor(nx);
+      var tileY = floor(ny);
+      if (nx > 1 && nx < MAPSIZE-1 && ny > 1 && ny < MAPSIZE-1 && map2[tileY][tileX] !== 1) {
+        npc.x = nx;
+        npc.y = ny;
+      } else {
+        npc.walkAngle += PI; // inverte direção
+      }
+    }
+    if (npc.walkTimer > 180) npc.walkTimer = 0;
+  }
+}
+
+// Função distância (se não existir)
+if (typeof dist === 'undefined') {
+  function dist(x1, y1, x2, y2) {
+    return sqrt((x1 - x2) * (x1 - x2) + (y1 - y2) * (y1 - y2));
+  }
+}
+
+function atualizarPlayer2D() {
+  if (dialogActive) return;
+  var map2 = MAPS[currentPhase];
+  var spd = 0.12;
+  if (keyIsDown(SHIFT)) spd = 0.2;
+  if (keyIsDown(CONTROL)) spd = 0.06;
+  player.running = keyIsDown(SHIFT);
+  player.crouching = keyIsDown(CONTROL);
+  if (player.running) {
+    player.stamina = max(0, player.stamina - 0.28);
+    if (player.stamina <= 0) spd = 0.08;
+  } else player.stamina = min(100, player.stamina + 0.18);
+
+  var dx = 0, dy = 0;
+  if (keyIsDown(87) || keyIsDown(UP_ARROW)) dy -= spd;   // W
+  if (keyIsDown(83) || keyIsDown(DOWN_ARROW)) dy += spd; // S
+  if (keyIsDown(65) || keyIsDown(LEFT_ARROW)) dx -= spd; // A
+  if (keyIsDown(68) || keyIsDown(RIGHT_ARROW)) dx += spd; // D
+
+  // Atualiza ângulo visual (opcional)
+  if (dx !== 0 || dy !== 0) {
+    player.angle = atan2(dy, dx);
+    player.moving = true;
+  } else {
+    player.moving = false;
+  }
+  var nx = player.x + dx, ny = player.y + dy, r = 0.35;
+  function isWalkable(x, y) {
+    var x1 = floor(x - r), x2 = floor(x + r);
+    var y1 = floor(y - r), y2 = floor(y + r);
+    for (var iy = y1; iy <= y2; iy++) {
+      for (var ix = x1; ix <= x2; ix++) {
+        if (ix >= 0 && ix < MAPSIZE && iy >= 0 && iy < MAPSIZE && map2[iy][ix] === 1) return false;
+      }
+    }
+
+function verificarInteracao2D() {
+  // Interação com NPCs
+  for (var i = 0; i < activeNPCs.length; i++) {
+    var npc = activeNPCs[i];
+    if (dist(player.x, player.y, npc.x, npc.y) < 2.4) {
+      dialogActive = true;
+      dialogNPC = npc;
+      dialogLine = 0;
+      npc.talking = true;
+      playDialog();
+      return;
+    }
+  }
+  // Interação com objetivos
+  for (var i = 0; i < spots.length; i++) {
+    var sp = spots[i];
+    if (!sp.done && dist(player.x, player.y, sp.x, sp.y) < 1.8) {
+      sp.done = true;
+      objDone++;
+      pickupAnim = 45;
+      playPickup();
+      if (objDone >= objTotal) {
+        phaseWin = true;
+        if (currentPhase < 5) phasesUnlocked[currentPhase + 1] = true;
+        saveProgress();
+      }
+      return;
+    }
+  }
+}
+    return true;
+  }
+  if (isWalkable(nx, player.y)) player.x = nx;
+  if (isWalkable(player.x, ny)) player.y = ny;
+
+  if (pointerLocked) {
+    player.angle += nativeMovX * 0.005;
+    nativeMovX = 0; nativeMovY = 0;
+  }
+
+if (keyIsDown(69) && !dialogActive && interactCool <= 0) {
+  verificarInteracao2D();
+  interactCool = 22;
+}
+  if (interactCool > 0) interactCool--;
+
+  if (player.moving) {
+    stepTimer++;
+    var rate = player.running ? 18 : 28;
+    if (stepTimer % rate === 0) playStep();
+  }
+}
+
+function saveProgress() { try { localStorage.setItem('agrinho2026_v8', JSON.stringify(phasesUnlocked)); } catch (e) { } }
+
+// ═════════════════════════════════════════════════════════════
+// RAYCASTING ENGINE MELHORADO
+// ═════════════════════════════════════════════════════════════
+// ── NOVA RENDERIZAÇÃO 2D ───────────────────────────────────
 function renderizarCena2D() {
-  let map2 = MAPS[currentPhase];
+  var map2 = MAPS[currentPhase];
   cameraX2 = player.x * TAMANHO_CELULA - width/2 + TAMANHO_CELULA/2;
   cameraY2 = player.y * TAMANHO_CELULA - height/2 + TAMANHO_CELULA/2;
   cameraX2 = constrain(cameraX2, 0, MAPSIZE * TAMANHO_CELULA - width);
   cameraY2 = constrain(cameraY2, 0, MAPSIZE * TAMANHO_CELULA - height);
   push();
   translate(-cameraX2, -cameraY2);
-  for(let y=0; y<MAPSIZE; y++) {
-    for(let x=0; x<MAPSIZE; x++) {
-      let tile = map2[y][x];
-      let xp = x * TAMANHO_CELULA;
-      let yp = y * TAMANHO_CELULA;
-      if(tile===1) {
-        fill(101,67,33); rect(xp,yp,TAMANHO_CELULA,TAMANHO_CELULA);
-        fill(139,90,43); rect(xp+4,yp+4,TAMANHO_CELULA-8,TAMANHO_CELULA-8);
-      } else if(tile===2) {
-        fill(101,67,33); rect(xp+10,yp+14,8,14);
-        fill(34,139,34); ellipse(xp+14,yp+10,18,18);
-      } else if(tile===3) {
-        fill(160,80,40); rect(xp,yp,TAMANHO_CELULA,TAMANHO_CELULA);
-        fill(200,120,60); rect(xp+4,yp+4,TAMANHO_CELULA-8,TAMANHO_CELULA-8);
-      } else if(tile===4) {
-        fill(80,140,40); rect(xp+12,yp+14,4,14);
-        fill(60,120,35); ellipse(xp+14,yp+10,10,12);
-      } else {
-        let cor = 90 + (x*3+y*2)%40;
-        fill(cor, cor-20, cor-50); rect(xp,yp,TAMANHO_CELULA,TAMANHO_CELULA);
-        fill(70,50,30,80); ellipse(xp+14,yp+20,10,6);
+  for (var y = 0; y < MAPSIZE; y++) {
+    for (var x = 0; x < MAPSIZE; x++) {
+      var tile = map2[y][x];
+      var xp = x * TAMANHO_CELULA;
+      var yp = y * TAMANHO_CELULA;
+      if (tile === 1) { // parede
+        fill(101, 67, 33); rect(xp, yp, TAMANHO_CELULA, TAMANHO_CELULA);
+        fill(139, 90, 43); rect(xp + 4, yp + 4, TAMANHO_CELULA - 8, TAMANHO_CELULA - 8);
+      } else if (tile === 2) { // árvore
+        fill(101, 67, 33); rect(xp + 10, yp + 14, 8, 14);
+        fill(34, 139, 34); ellipse(xp + 14, yp + 10, 18, 18);
+      } else if (tile === 3) { // celeiro
+        fill(160, 80, 40); rect(xp, yp, TAMANHO_CELULA, TAMANHO_CELULA);
+        fill(200, 120, 60); rect(xp + 4, yp + 4, TAMANHO_CELULA - 8, TAMANHO_CELULA - 8);
+      } else if (tile === 4) { // milho
+        fill(80, 140, 40); rect(xp + 12, yp + 14, 4, 14);
+        fill(60, 120, 35); ellipse(xp + 14, yp + 10, 10, 12);
+      } else if (tile === 5) { // pedra
+        fill(120, 110, 100); ellipse(xp + 14, yp + 18, 18, 12);
+      } else { // chão
+        var cor = 90 + (x * 3 + y * 2) % 40;
+        fill(cor, cor - 20, cor - 50); rect(xp, yp, TAMANHO_CELULA, TAMANHO_CELULA);
+        fill(70, 50, 30, 80); ellipse(xp + 14, yp + 20, 10, 6);
       }
     }
   }
-  for(let sp of spots) if(!sp.done) {
-    let xp = sp.x * TAMANHO_CELULA, yp = sp.y * TAMANHO_CELULA;
-    let pulse = 150 + sin(frameCount*0.1)*105;
-    fill(255,100,100,pulse); ellipse(xp+14,yp+14,24,24);
-    fill(255,50,50); ellipse(xp+14,yp+14,16,16);
-    fill(255); textSize(16); text(PHASE_DATA[currentPhase].icone, xp+14, yp+14);
+  // Spots (objetivos)
+  for (var i = 0; i < spots.length; i++) {
+    if (!spots[i].done) {
+      var xp = spots[i].x * TAMANHO_CELULA;
+      var yp = spots[i].y * TAMANHO_CELULA;
+      var pulse = 150 + sin(frameCount * 0.1) * 105;
+      fill(255, 100, 100, pulse); ellipse(xp + 14, yp + 14, 24, 24);
+      fill(255, 50, 50); ellipse(xp + 14, yp + 14, 16, 16);
+      fill(255); textSize(16); text('⭐', xp + 14, yp + 14);
+    }
   }
-  for(let n of activeNPCs) {
-    let ch = CHARS[n.charIdx];
-    let xp = n.x * TAMANHO_CELULA, yp = n.y * TAMANHO_CELULA;
-    fill(ch.shirtR,ch.shirtG,ch.shirtB); rect(xp+5,yp+10,18,18,3);
-    fill(ch.skinR,ch.skinG,ch.skinB); ellipse(xp+14,yp+8,14,14);
-    if(ch.hat) { fill(ch.shirtR*0.6,ch.shirtG*0.6,ch.shirtB*0.6); rect(xp+7,yp+2,14,5,2); }
-    fill(0); ellipse(xp+10,yp+7,2,2); ellipse(xp+18,yp+7,2,2);
-    fill(255,255,200); textSize(7); text(ch.name, xp+14, yp-2);
+  // NPCs
+  for (var i = 0; i < activeNPCs.length; i++) {
+    var npc = activeNPCs[i];
+    var ch = CHARS[npc.charIdx];
+    var xp = npc.x * TAMANHO_CELULA;
+    var yp = npc.y * TAMANHO_CELULA;
+    fill(ch.shirtR, ch.shirtG, ch.shirtB); rect(xp + 5, yp + 10, 18, 18, 3);
+    fill(ch.skinR, ch.skinG, ch.skinB); ellipse(xp + 14, yp + 8, 14, 14);
+    if (ch.hat) { fill(ch.shirtR * 0.6, ch.shirtG * 0.6, ch.shirtB * 0.6); rect(xp + 7, yp + 2, 14, 5, 2); }
+    fill(0); ellipse(xp + 10, yp + 7, 2, 2); ellipse(xp + 18, yp + 7, 2, 2);
+    fill(255, 255, 200); textSize(7); text(ch.name, xp + 14, yp - 2);
   }
-  let xp = player.x * TAMANHO_CELULA, yp = player.y * TAMANHO_CELULA;
-  fill(60,120,60); rect(xp+5,yp+10,18,18,3);
-  fill(255,200,150); ellipse(xp+14,yp+8,14,14);
-  fill(101,67,33); rect(xp+7,yp+2,14,5,2);
-  fill(0); ellipse(xp+10,yp+7,2,2); ellipse(xp+18,yp+7,2,2);
-  let ang = player.angle, dx = cos(ang)*10, dy = sin(ang)*10;
-  fill(255,200,100); triangle(xp+14+dx, yp+14+dy, xp+14+dx*0.3+4, yp+14+dy*0.3, xp+14+dx*0.3-4, yp+14+dy*0.3);
+  // Jogador
+  var xp = player.x * TAMANHO_CELULA;
+  var yp = player.y * TAMANHO_CELULA;
+  fill(60, 120, 60); rect(xp + 5, yp + 10, 18, 18, 3);
+  fill(255, 200, 150); ellipse(xp + 14, yp + 8, 14, 14);
+  fill(101, 67, 33); rect(xp + 7, yp + 2, 14, 5, 2);
+  fill(0); ellipse(xp + 10, yp + 7, 2, 2); ellipse(xp + 18, yp + 7, 2, 2);
+  // Seta de direção
+  var ang = player.angle;
+  var dx = cos(ang) * 10, dy = sin(ang) * 10;
+  fill(255, 200, 100);
+  triangle(xp + 14 + dx, yp + 14 + dy,
+           xp + 14 + dx * 0.3 + 4, yp + 14 + dy * 0.3,
+           xp + 14 + dx * 0.3 - 4, yp + 14 + dy * 0.3);
   pop();
 }
 
-function desenharMiniMapa() {
-  let map2 = MAPS[currentPhase];
-  let miniSize = 90, cellSize = miniSize/9, offX = width-miniSize-10, offY = 55;
-  fill(0,180); rect(offX-2,offY-2,miniSize+4,miniSize+4,5);
-  let startX = max(0, min(MAPSIZE-9, floor(player.x)-4));
-  let startY = max(0, min(MAPSIZE-9, floor(player.y)-4));
-  for(let i=0;i<9;i++) for(let j=0;j<9;j++) {
-    let mx = startX+j, my = startY+i;
-    if(mx<MAPSIZE && my<MAPSIZE) {
-      let tile = map2[my][mx];
-      let cor = (tile===1) ? color(80,70,50) : color(100,80,50);
-      fill(cor); rect(offX+j*cellSize, offY+i*cellSize, cellSize, cellSize);
+// Mantém o nome antigo para compatibilidade
+function renderizarCena3D() {
+  renderizarCena2D();
+}
+
+function setPixelRGB(x, y, r, g, b) {
+  var idx = 4 * (y * width + x);
+  if (idx < 0 || idx >= pixels.length - 3) return;
+  pixels[idx] = constrain(r, 0, 255); pixels[idx + 1] = constrain(g, 0, 255); pixels[idx + 2] = constrain(b, 0, 255); pixels[idx + 3] = 255;
+}
+
+// ═════════════════════════════════════════════════════════════
+// SPRITES — NPCs pixel art animados
+// ═════════════════════════════════════════════════════════════
+function renderizarSprites() {
+  var pd = PHASE_DATA[currentPhase];
+  var H = height;
+  var bob = player.moving ? sin(player.bobTime) * 7 : 0;
+  var horizon = int(H / 2 + player.pitch + bob + (player.crouching ? 20 : 0));
+  var sprites = [];
+  for (var i = 0; i < activeNPCs.length; i++) sprites.push({ type: 'npc', x: activeNPCs[i].x, y: activeNPCs[i].y, data: activeNPCs[i], idx: i });
+  for (var i = 0; i < spots.length; i++) if (!spots[i].done) sprites.push({ type: 'spot', x: spots[i].x, y: spots[i].y, data: spots[i], idx: i });
+  sprites.sort(function (a, b) { return dist(player.x, player.y, b.x, b.y) - dist(player.x, player.y, a.x, a.y); });
+  var dirX = cos(player.angle), dirY = sin(player.angle);
+  var planeX = -dirY * 0.66, planeY = dirX * 0.66;
+  var det = planeX * dirY - planeY * dirX;
+  if (abs(det) < 0.0001) return;
+  loadPixels();
+  for (var si = 0; si < sprites.length; si++) {
+    var sp = sprites[si];
+    var sprX = sp.x - player.x, sprY = sp.y - player.y;
+    var transX = (dirY * sprX - dirX * sprY) / det;
+    var transY = (planeY * sprX - planeX * sprY) / (-det);
+    if (transY <= 0.25) continue;
+    var sprScreenX = int((width / 2) * (1 + transX / transY));
+    var sprH = min(int(H / transY), H * 2);
+    var sprW = int(sprH * 0.55);
+    var drawSY = max(0, floor(horizon - sprH / 2));
+    var drawEY = min(H - 1, floor(horizon + sprH / 2));
+    var drawSX = max(0, floor(sprScreenX - sprW / 2));
+    var drawEX = min(width - 1, floor(sprScreenX + sprW / 2));
+    var fogSpr = max(constrain(transY / pd.fogDist, 0, 1), 1 - exp(-transY * pd.fogDensity)) * 0.68;
+    var walkFrame = floor(frameCount * 0.1 + si * 2.5) % 4;
+    var ch = sp.type === 'npc' ? CHARS[sp.data.charIdx] : null;
+    for (var x = drawSX; x <= drawEX; x++) {
+      if (x < 0 || x >= width) continue;
+      if (transY >= (zBuf[x] || 999)) continue;
+      var txNPC = floor((x - (sprScreenX - sprW / 2)) / max(sprW, 1) * 12);
+      txNPC = constrain(txNPC, 0, 11);
+      for (var y = drawSY; y <= drawEY; y++) {
+        if (y < 0 || y >= H) continue;
+        var tyNPC = floor((y - int(horizon - sprH / 2)) / max(sprH, 1) * 20);
+        tyNPC = constrain(tyNPC, 0, 19);
+        var pr = -1, pg2 = -1, pb2 = -1, pa = 255;
+        if (sp.type === 'npc' && ch) {
+          var cor = getPixelNPC(ch, txNPC, tyNPC, walkFrame, si);
+          if (cor === null) continue;
+          pr = cor[0]; pg2 = cor[1]; pb2 = cor[2]; pa = cor[3];
+        } else if (sp.type === 'spot') {
+          var pulse = sin(frameCount * 0.14 + si * 2.1) * 0.5 + 0.5;
+          var inBody = (txNPC >= 3 && txNPC <= 8 && tyNPC >= 3 && tyNPC <= 14);
+          var inStem = (txNPC >= 5 && txNPC <= 6 && tyNPC >= 14 && tyNPC <= 18);
+          if (inBody) { pr = 60 + int(pulse * 160); pg2 = 200 + int(pulse * 55); pb2 = 60; }
+          else if (inStem) { pr = 50 + int(pulse * 100); pg2 = 180 + int(pulse * 50); pb2 = 50; }
+          else continue;
+          pa = 200 + int(pulse * 55);
+        }
+        if (pr < 0) continue;
+        pr = int(lerp(pr, pd.fogR, fogSpr)); pg2 = int(lerp(pg2, pd.fogG, fogSpr)); pb2 = int(lerp(pb2, pd.fogB, fogSpr));
+        var pidx = 4 * (y * width + x);
+        if (pidx < 0 || pidx >= pixels.length - 3) continue;
+        pixels[pidx] = constrain(pr, 0, 255); pixels[pidx + 1] = constrain(pg2, 0, 255);
+        pixels[pidx + 2] = constrain(pb2, 0, 255); pixels[pidx + 3] = pa;
+      }
     }
   }
-  let px = offX + ((player.x-startX)*cellSize);
-  let py = offY + ((player.y-startY)*cellSize);
-  fill(255,255,100); ellipse(px, py, cellSize*0.8, cellSize*0.8);
+  updatePixels();
+  for (var si = 0; si < sprites.length; si++) {
+    var sp = sprites[si];
+    var sprX2 = sp.x - player.x, sprY2 = sp.y - player.y;
+    var transX2 = (dirY * sprX2 - dirX * sprY2) / det;
+    var transY2 = (planeY * sprX2 - planeX * sprY2) / (-det);
+    if (transY2 <= 0.25 || transY2 > 4.0) continue;
+    var scrX2 = int((width / 2) * (1 + transX2 / transY2));
+    var sH2 = min(int(height / transY2), height * 2);
+    var topY2 = max(0, floor(horizon - sH2 / 2));
+    var labelAl = map(transY2, 0.3, 3.8, 255, 0);
+    noStroke(); fill(0, labelAl * 0.72); rect(scrX2 - 62, topY2 - 34, 124, 22, 4);
+    fill(200, 255, 170, labelAl); textFont('Courier New'); textAlign(CENTER, CENTER); textStyle(BOLD); textSize(10);
+    if (sp.type === 'npc') text(CHARS[sp.data.charIdx].name + '  [E]', scrX2, topY2 - 23);
+    else text('[E] ' + PHASE_DATA[currentPhase].tool, scrX2, topY2 - 23);
+    textStyle(NORMAL);
+  }
+}
+
+function getPixelNPC(ch, tx, ty, walkFrame, si) {
+  var idleSwing = sin(frameCount * 0.06 + si * 1.2) * 0.5 + 0.5;
+  var legShiftL = 0, legShiftR = 0;
+  if (walkFrame === 1) { legShiftL = -2; legShiftR = 2; }
+  else if (walkFrame === 3) { legShiftL = 2; legShiftR = -2; }
+  if (ch.hat) {
+    if (ty === 0 && tx >= 2 && tx <= 9) return [int(ch.shirtR * 0.55), int(ch.shirtG * 0.55), int(ch.shirtB * 0.55), 255];
+    if (ty >= 1 && ty <= 2 && tx >= 3 && tx <= 8) return [int(ch.shirtR * 0.65), int(ch.shirtG * 0.65), int(ch.shirtB * 0.65), 255];
+    if (ty === 2 && (tx === 3 || tx === 8)) return [int(ch.shirtR * 0.4), int(ch.shirtG * 0.4), int(ch.shirtB * 0.4), 255];
+    if (ty === 3 && tx >= 3 && tx <= 8) return [ch.skinR, ch.skinG, ch.skinB, 255];
+  } else {
+    if (ty === 0 && tx >= 2 && tx <= 9) return [ch.hairR, ch.hairG, ch.hairB, 255];
+    if (ty === 1 && tx >= 2 && tx <= 9) {
+      if (tx === 2 || tx === 9) return [int(ch.hairR * 0.8), int(ch.hairG * 0.8), int(ch.hairB * 0.8), 255];
+      return [ch.hairR, ch.hairG, ch.hairB, 255];
+    }
+    if (ty === 2) {
+      if (tx === 2 || tx === 9) return [int(ch.hairR * 0.75), int(ch.hairG * 0.75), int(ch.hairB * 0.75), 255];
+      if (tx >= 3 && tx <= 8) return [ch.skinR, ch.skinG, ch.skinB, 255];
+    }
+    if (ty === 3 && (tx === 2 || tx === 9)) return [int(ch.hairR * 0.7), int(ch.hairG * 0.7), int(ch.hairB * 0.7), 255];
+  }
+  var headStart = ch.hat ? 3 : 3;
+  if (ty >= headStart && ty <= 7) {
+    if (tx >= 3 && tx <= 8) {
+      if (ty === headStart + 1 && (tx === 4 || tx === 7)) { return [30, 20, 10, 255]; }
+      if (ty === headStart + 1 && (tx === 4 || tx === 7)) { return [255, 255, 255, 200]; }
+      if (ty === headStart && (tx === 4 || tx === 5 || tx === 7 || tx === 6)) { return [int(ch.hairR * 0.9), int(ch.hairG * 0.9), int(ch.hairB * 0.9), 255]; }
+      if (ty === headStart + 2 && (tx === 5 || tx === 6)) return [int(ch.skinR * 0.85), int(ch.skinG * 0.82), int(ch.skinB * 0.80), 255];
+      if (ty === headStart + 3 && (tx === 4 || tx === 5 || tx === 6 || tx === 7)) return [int(ch.skinR * 0.70), int(ch.skinG * 0.55), int(ch.skinB * 0.55), 255];
+      if (tx === 3 || tx === 8) return [int(ch.skinR * 0.90), int(ch.skinG * 0.88), int(ch.skinB * 0.86), 255];
+      return [ch.skinR, ch.skinG, ch.skinB, 255];
+    }
+    return null;
+  }
+  if (ty === 8) {
+    if (tx >= 5 && tx <= 6) return [int(ch.skinR * 0.92), int(ch.skinG * 0.90), int(ch.skinB * 0.88), 255];
+    return null;
+  }
+  if (ty >= 9 && ty <= 10) {
+    if (tx >= 1 && tx <= 2) {
+      var armSwingL = ty === 10 ? int(idleSwing * 12) : 0;
+      return [int(ch.shirtR * 0.78 + armSwingL), int(ch.shirtG * 0.78), int(ch.shirtB * 0.78), 255];
+    }
+    if (tx >= 9 && tx <= 10) {
+      var armSwingR = ty === 10 ? int((1 - idleSwing) * 12) : 0;
+      return [int(ch.shirtR * 0.78 + armSwingR), int(ch.shirtG * 0.78), int(ch.shirtB * 0.78), 255];
+    }
+  }
+  if (ty === 11 && tx >= 1 && tx <= 2) return [int(ch.skinR * 0.95), int(ch.skinG * 0.92), int(ch.skinB * 0.88), 255];
+  if (ty === 11 && tx >= 9 && tx <= 10) return [int(ch.skinR * 0.95), int(ch.skinG * 0.92), int(ch.skinB * 0.88), 255];
+  if (ty >= 9 && ty <= 13) {
+    if (tx >= 3 && tx <= 8) {
+      if (ch.coat) {
+        if (tx === 3 || tx === 8) return [int(ch.shirtR * 0.85), int(ch.shirtG * 0.85), int(ch.shirtB * 0.85), 255];
+        if ((tx === 4 || tx === 7) && ty >= 11) return [int(ch.shirtR * 0.6), int(ch.shirtG * 0.6), int(ch.shirtB * 0.65), 255];
+        return [ch.shirtR, ch.shirtG, ch.shirtB, 255];
+      }
+      if (tx === 5 && (ty === 10 || ty === 12)) return [int(ch.shirtR * 0.7), int(ch.shirtG * 0.7), int(ch.shirtB * 0.7), 255];
+      if (tx === 3 || tx === 8) return [int(ch.shirtR * 0.82), int(ch.shirtG * 0.82), int(ch.shirtB * 0.82), 255];
+      return [ch.shirtR, ch.shirtG, ch.shirtB, 255];
+    }
+    return null;
+  }
+  if (ty === 14) {
+    if (tx >= 3 && tx <= 8) return [int(ch.beltR || 60), int(ch.beltG || 45), int(ch.beltB || 30), 255];
+    return null;
+  }
+  if (ty >= 15 && ty <= 19) {
+    var legTy = ty - 15;
+    if (tx >= 3 && tx <= 5) {
+      var adjustedTy = legTy + legShiftL;
+      if (adjustedTy < 0 || adjustedTy > 4) return null;
+      if (adjustedTy === 4) return [int(ch.bootR || 45), int(ch.bootG || 35), int(ch.bootB || 25), 255];
+      return [ch.pantR, ch.pantG, ch.pantB, 255];
+    }
+    if (tx >= 6 && tx <= 8) {
+      var adjustedTy2 = legTy + legShiftR;
+      if (adjustedTy2 < 0 || adjustedTy2 > 4) return null;
+      if (adjustedTy2 === 4) return [int(ch.bootR || 45), int(ch.bootG || 35), int(ch.bootB || 25), 255];
+      return [int(ch.pantR * 0.88), int(ch.pantG * 0.88), int(ch.pantB * 0.88), 255];
+    }
+    return null;
+  }
+  return null;
+}
+
+// ═════════════════════════════════════════════════════════════
+// VENTO VISUAL
+// ═════════════════════════════════════════════════════════════
+function desenharVento() {
+  var pd = PHASE_DATA[currentPhase];
+  var wStr = pd.night ? 0.5 : 0.9;
+  for (var i = 0; i < windParts.length; i++) {
+    var wp = windParts[i]; wp.t += 0.05; wp.x += wp.speed;
+    if (wp.x > width + wp.len) { wp.x = -wp.len; wp.y = random(height * 0.25, height * 0.78); }
+    var curveY = sin(wp.t) * wp.curveAmp;
+    stroke(255, 252, 220, wp.alpha * (0.5 + sin(wp.t * 0.7) * 0.5) * wStr); strokeWeight(0.6 + wp.curveAmp * 0.12);
+    line(wp.x, wp.y + curveY, wp.x - wp.len * 0.7, wp.y - curveY * 0.3);
+  }
+  noStroke();
+}
+
+// ═════════════════════════════════════════════════════════════
+// BRAÇOS / FERRAMENTA — melhorados
+// ═════════════════════════════════════════════════════════════
+function desenharBracos() {
+  var bob = player.moving ? sin(player.bobTime) * 12 : 0;
+  var bobX = player.moving ? cos(player.bobTime * 0.5) * 6 : 0;
+  var crouchShift = player.crouching ? 25 : 0;
+  var pd = PHASE_DATA[currentPhase];
+  var toolColors = [[70, 200, 90], [50, 130, 220], [215, 115, 45], [155, 150, 165], [45, 185, 115], [75, 145, 235]];
+  var tc = toolColors[currentPhase];
+  push();
+  var armBaseY = height - 90 + bob + crouchShift;
+  var armBaseX = width - 155 + bobX;
+  noStroke(); fill(0, 55); ellipse(armBaseX + 8, armBaseY + 12, 52, 22);
+  fill(68, 48, 30);
+  beginShape(); vertex(armBaseX - 20, armBaseY + 50); vertex(armBaseX + 30, armBaseY + 30); vertex(width + 10, armBaseY + 50 + bob * 0.3); vertex(width + 10, height + 10); vertex(armBaseX - 30, height + 10); endShape(CLOSE);
+  fill(68, 48, 30);
+  beginShape(); vertex(armBaseX - 18, armBaseY + 15); vertex(armBaseX + 28, armBaseY - 5); vertex(armBaseX + 35, armBaseY + 30); vertex(armBaseX - 10, armBaseY + 52); endShape(CLOSE);
+  fill(188, 143, 98); ellipse(armBaseX + 5, armBaseY + 10, 38, 30);
+  fill(182, 138, 94); for (var fi = 0; fi < 4; fi++) rect(armBaseX - 8 + fi * 8, armBaseY - 2, 6, 11, 3);
+  fill(178, 134, 90); rect(armBaseX - 14, armBaseY + 4, 10, 9, 3);
+  noStroke();
+  var toolH = 78, toolW = 16;
+  var tx2 = armBaseX - 6, ty2 = armBaseY - toolH + 8;
+  if (currentPhase === 0 || currentPhase === 1) {
+    fill(38, 44, 54); rect(tx2 - 2, ty2, toolW + 4, toolH, 4);
+    fill(tc[0], tc[1], tc[2]); rect(tx2 + 1, ty2 + 5, toolW, 22, 2);
+    fill(0, 220, 100, 185); rect(tx2 + 3, ty2 + 8, 8, 3, 1); fill(0, 180, 80, 120); rect(tx2 + 3, ty2 + 13, 6, 2, 1); fill(0, 160, 60, 100); rect(tx2 + 3, ty2 + 17, 10, 2, 1);
+    fill(55, 65, 78); rect(tx2 + 2, ty2 + 30, toolW - 2, toolH - 34, 2);
+    fill(0, 255, 100, 180 + sin(frameCount * 0.2) * 75); ellipse(tx2 + toolW - 3, ty2 + 3, 5, 5);
+    fill(255, 200, 0, 160 + sin(frameCount * 0.15) * 60); ellipse(tx2 + 3, ty2 + 3, 4, 4);
+  } else if (currentPhase === 2) {
+    fill(48, 48, 62); rect(tx2, ty2 + 18, toolW, toolH - 18, 3);
+    fill(tc[0], tc[1], tc[2]); rect(tx2 + toolW / 2 - 2, ty2, 4, 22, 2);
+    fill(255, 80, 40, 200 + sin(frameCount * 0.25) * 55); ellipse(tx2 + toolW / 2, ty2, 8, 8);
+    fill(58, 62, 78); rect(tx2 + 2, ty2 + 22, toolW - 2, 22, 2);
+    fill(255, 140, 40, 165 + sin(frameCount * 0.18) * 55); ellipse(tx2 + toolW / 2, ty2 + 33, 6, 6);
+    fill(0, 255, 180, 140 + sin(frameCount * 0.22) * 40); rect(tx2 + 3, ty2 + 38, toolW - 4, 5, 2);
+  } else if (currentPhase === 3) {
+    fill(tc[0], tc[1], tc[2]); rect(tx2 + 4, ty2, 7, toolH * 0.65, 2);
+    fill(48, 58, 68); rect(tx2 + 1, ty2 + toolH * 0.6, toolW + 2, toolH * 0.35, 4);
+    fill(180, 220, 255, 165); rect(tx2 + 3, ty2 + toolH * 0.62, toolW - 2, toolH * 0.28, 3);
+    fill(140, 200, 80, 105); rect(tx2 + 3, ty2 + toolH * 0.72, toolW - 2, toolH * 0.1, 1);
+  } else if (currentPhase === 4) {
+    fill(118, 78, 38); rect(tx2 + 6, ty2, 5, toolH * 0.7, 1);
+    fill(158, 98, 43); rect(tx2 + 2, ty2 + toolH * 0.65, toolW, toolH * 0.25, 2);
+    fill(78, 53, 23); rect(tx2 + 4, ty2 + toolH * 0.88, toolW - 4, toolH * 0.1, 1);
+    fill(tc[0], tc[1], tc[2], 200); ellipse(tx2 + toolW / 2, ty2 + toolH * 0.5, 20, 20);
+    fill(48, 118, 38, 185); ellipse(tx2 + toolW / 2, ty2 + toolH * 0.5, 11, 14);
+  } else {
+    fill(38, 40, 50); rect(tx2 - 5, ty2 + 20, toolW + 10, toolH - 20, 5);
+    fill(tc[0], tc[1], tc[2]); rect(tx2 - 4, ty2 + 25, toolW + 8, 30, 4);
+    fill(0, 180, 255, 185 + sin(frameCount * 0.18) * 50); rect(tx2 - 2, ty2 + 28, toolW + 4, 15, 3);
+    fill(48, 50, 60); rect(tx2 + 1, ty2 + 5, 3, 20, 1); rect(tx2 + toolW - 2, ty2 + 5, 3, 20, 1);
+    fill(255, 100, 80, 185); ellipse(tx2 + 2, ty2 + 5, 6, 6); fill(100, 255, 80, 185); ellipse(tx2 + toolW, ty2 + 5, 6, 6);
+  }
+  if (!pointerLocked) {
+    noStroke(); fill(0, 140); rect(width / 2 - 105, height - 50, 210, 22, 4);
+    fill(255, 200, 80, 200); textFont('Courier New'); textAlign(CENTER, CENTER); textSize(9);
+    text('CLIQUE no jogo para travar a câmera (pointer lock)', width / 2, height - 39);
+  }
+  pop();
+}
+
+// ═════════════════════════════════════════════════════════════
+// HUD
+// ═════════════════════════════════════════════════════════════
+function desenharHUD() {
+  var pd = PHASE_DATA[currentPhase];
+  noStroke(); fill(0, 195); rect(0, 0, width, 48);
+  textFont('Courier New');
+  fill(175, 248, 140); textStyle(BOLD); textSize(12); textAlign(LEFT, CENTER); text(pd.name + ' — ' + pd.subtitle, 14, 14);
+  textStyle(NORMAL); fill(135, 200, 105, 185); textSize(9); text(pd.toolTip + '  |  Setas girar câmera', 14, 30);
+  var prog = objDone / max(objTotal, 1);
+  fill(0, 100); rect(width / 2 - 85, 8, 170, 30, 4); fill(28, 100, 22, 185); rect(width / 2 - 83, 10, 164 * prog, 26, 3);
+  stroke(55, 155, 45, 145); strokeWeight(1); rect(width / 2 - 83, 10, 164, 26, 3); noStroke();
+  fill(195, 255, 165); textStyle(BOLD); textAlign(CENTER, CENTER); textSize(11);
+  text(pd.objLabel + ': ' + objDone + ' / ' + objTotal, width / 2, 23); textStyle(NORMAL);
+  if (phaseTimer > 0) {
+    var secs = ceil(phaseTimer / 60);
+    var urgent = secs < 60;
+    var pulseT = urgent ? (sin(frameCount * 0.25) * 0.5 + 0.5) : 1;
+    fill(urgent ? color(255, int(55 * pulseT), int(35 * pulseT)) : color(255, 220, 80));
+    textStyle(BOLD); textAlign(RIGHT, CENTER); textSize(14);
+    text('⏱ ' + floor(secs / 60) + ':' + (secs % 60 < 10 ? '0' : '') + (secs % 60), width - 14, 22); textStyle(NORMAL);
+  }
+  textAlign(RIGHT, CENTER); textSize(9); noStroke(); fill(0, 120); rect(width - 124, 52, 110, 13, 3);
+  fill(player.running ? color(255, 175, 0) : color(65, 195, 65)); rect(width - 122, 54, player.stamina * 1.06, 9, 2);
+  fill(195, 200, 175); text('STAMINA', width - 14, 58);
+  noStroke(); fill(0, 120); rect(width - 124, 68, 110, 10, 3);
+  fill(215, 55, 55); rect(width - 122, 70, player.health * 1.06, 6, 2);
+  fill(195, 200, 175); textSize(9); text('SAÚDE', width - 14, 75);
+  var cx2 = width / 2, cy2 = height / 2 + player.pitch;
+  var chSize = player.crouching ? 5 : 7, chGap = player.crouching ? 4 : 3;
+  stroke(255, 255, 255, 200); strokeWeight(1.5);
+  line(cx2 - chSize - chGap, cy2, cx2 - chGap, cy2); line(cx2 + chGap, cy2, cx2 + chSize + chGap, cy2);
+  line(cx2, cy2 - chSize - chGap, cx2, cy2 - chGap); line(cx2, cy2 + chGap, cx2, cy2 + chSize + chGap);
+  noStroke(); fill(255, 255, 255, 130); ellipse(cx2, cy2, 3, 3);
+  var nearObj = false;
+  for (var i = 0; i < activeNPCs.length; i++) if (dist(player.x, player.y, activeNPCs[i].x, activeNPCs[i].y) < 2.4) nearObj = true;
+  for (var i = 0; i < spots.length; i++) if (!spots[i].done && dist(player.x, player.y, spots[i].x, spots[i].y) < 1.8) nearObj = true;
+  if (nearObj) {
+    var pulseA = 180 + sin(frameCount * 0.2) * 75;
+    noStroke(); fill(0, pulseA * 0.5); rect(cx2 - 58, cy2 + 18, 116, 24, 4);
+    fill(115, 255, 115, pulseA); textFont('Courier New'); textStyle(BOLD); textSize(11); textAlign(CENTER, CENTER);
+    text('[E] ' + pd.tool, cx2, cy2 + 30); textStyle(NORMAL);
+  }
+  noStroke(); fill(0, 160); rect(0, height - 26, width, 26);
+  fill(145, 195, 115, 165); textFont('Courier New'); textAlign(LEFT, CENTER); textSize(8);
+  text('WASD mover  |  Mouse/Setas câmera  |  Shift correr  |  Ctrl agachar  |  E interagir  |  ESC pausar', 14, height - 13);
+  if (pd.night) {
+    for (var r = min(width, height) * 0.58; r > 30; r -= 4) { var v = map(r, 30, min(width, height) * 0.58, 190, 0); noFill(); stroke(0, v); strokeWeight(4); ellipse(width / 2, height / 2, r * 2, r * 2); }
+    noStroke(); fill(0, 140); rect(10, 50, 145, 18, 4);
+    fill(120, 200, 255, 185); textFont('Courier New'); textSize(9); textAlign(LEFT, CENTER); text('◉ VISÃO NOTURNA ATIVA', 18, 59);
+  }
+}
+
+// ═════════════════════════════════════════════════════════════
+// DIÁLOGO
+// ═════════════════════════════════════════════════════════════
+function desenharDialogo() {
+  if (!dialogNPC) return;
+  var dialogs = DIALOGUES[currentPhase];
+  var lines = dialogs[dialogNPC.dialogSet] || [];
+  if (dialogLine >= lines.length) { dialogActive = false; dialogNPC = null; return; }
+  var texto = lines[dialogLine];
+  noStroke(); fill(0, 220); rect(0, height - 118, width, 118);
+  stroke(65, 150, 50, 160); strokeWeight(1); line(0, height - 118, width, height - 118); noStroke();
+  var ch = CHARS[dialogNPC.charIdx];
+  desenharRetratoCompleto(['juca', 'marina', 'pedro', 'conceicao', 'tonho', 'biu', 'lena', 'costa', 'ana', 'clara'][dialogNPC.charIdx], 55, height - 62, 240);
+  fill(ch.shirtR, ch.shirtG, ch.shirtB); textStyle(BOLD); textFont('Courier New'); textSize(12); textAlign(LEFT, CENTER);
+  text(ch.name, 108, height - 106);
+  textStyle(NORMAL); fill(235, 230, 212); textSize(12.5);
+  var palavras = texto.split(' '); var linha = ''; var linhas = [];
+  for (var i = 0; i < palavras.length; i++) { var te = linha + (linha === '' ? '' : ' ') + palavras[i]; if (textWidth(te) > width - 120) { linhas.push(linha); linha = palavras[i]; } else linha = te; } linhas.push(linha);
+  for (var i = 0; i < min(linhas.length, 3); i++) text(linhas[i], 108, height - 84 + i * 22);
+  fill(135, 195, 115, 165); textSize(9); textAlign(RIGHT, BOTTOM);
+  text('[E/CLIQUE] ' + (dialogLine < lines.length - 1 ? 'Próximo' : 'Fechar') + '   (' + (dialogLine + 1) + '/' + lines.length + ')', width - 10, height - 6);
+  noStroke(); fill(48, 95, 42, 135); rect(0, height - 4, width, 4);
+  fill(75, 180, 60, 195); rect(0, height - 4, width * ((dialogLine + 1) / lines.length), 4);
+}
+
+// ═════════════════════════════════════════════════════════════
+// PICKUP FX
+// ═════════════════════════════════════════════════════════════
+function desenharPickupFx() {
+  var prog = 1 - pickupAnim / 45;
+  var alpha = map(pickupAnim, 45, 0, 255, 0);
+  var scale2 = 1 + prog * 0.5;
+  noStroke(); fill(115, 255, 115, alpha * 0.32); ellipse(width / 2, height / 2, 82 * scale2, 82 * scale2);
+  fill(195, 255, 175, alpha); textFont('Courier New'); textStyle(BOLD); textAlign(CENTER, CENTER); textSize(16);
+  text('+1 ' + PHASE_DATA[currentPhase].tool, width / 2, height / 2 - 42 - prog * 18); textStyle(NORMAL);
+  if (objDone >= objTotal && !phaseWin) { fill(255, 255, 100, alpha); textSize(20); text('FASE COMPLETA!', width / 2, height / 2 - 72 - prog * 14); }
+}
+
+function desenharMiniMapa() {
+  var map2 = MAPS[currentPhase];
+  var miniSize = 90;
+  var cellSize = miniSize / 9;
+  var offsetX = width - miniSize - 10;
+  var offsetY = 55;
+  fill(0, 180); rect(offsetX - 2, offsetY - 2, miniSize + 4, miniSize + 4, 5);
+  var startX = max(0, min(MAPSIZE - 9, floor(player.x) - 4));
+  var startY = max(0, min(MAPSIZE - 9, floor(player.y) - 4));
+  for (var i = 0; i < 9; i++) {
+    for (var j = 0; j < 9; j++) {
+      var mapX = startX + j, mapY = startY + i;
+      if (mapX < MAPSIZE && mapY < MAPSIZE) {
+        var tile = map2[mapY][mapX];
+        var cor = (tile === 1) ? color(80, 70, 50) : color(100, 80, 50);
+        fill(cor);
+        rect(offsetX + j * cellSize, offsetY + i * cellSize, cellSize, cellSize);
+      }
+    }
+  }
+  var px = offsetX + ((player.x - startX) * cellSize);
+  var py = offsetY + ((player.y - startY) * cellSize);
+  fill(255, 255, 100); ellipse(px, py, cellSize * 0.8, cellSize * 0.8);
 }
 
 function desenharBracos2D() {
-  let pd = PHASE_DATA[currentPhase];
-  fill(0,180); rect(width-150, height-50, 140, 40, 8);
-  fill(255,200,80); textSize(11); text(pd.icone+' '+pd.tool, width-140, height-30);
-  fill(200); textSize(9); text('[E] Interagir', width-140, height-18);
-  if(!pointerLocked && campaignState==='gameplay') {
-    fill(0,140); rect(width/2-105, height-45, 210, 20, 4);
-    fill(255,200,80); textSize(9); text('CLIQUE para travar a câmera', width/2, height-35);
+  var pd = PHASE_DATA[currentPhase];
+  fill(0, 180); rect(width - 150, height - 50, 140, 40, 8);
+  fill(255, 200, 80); textSize(11); text(pd.tool, width - 140, height - 30);
+  fill(200); textSize(9); text('[E] Interagir', width - 140, height - 18);
+  if (!pointerLocked && campaignState === 'gameplay') {
+    fill(0, 140); rect(width/2 - 105, height - 45, 210, 20, 4);
+    fill(255, 200, 80); textSize(9); text('CLIQUE para travar a câmera', width/2, height - 35);
   }
 }
 
 function desenharHUD2D() {
-  let pd = PHASE_DATA[currentPhase];
-  fill(0,195); rect(0,0,width,48);
-  fill(175,248,140); textSize(12); text(pd.name+' — '+pd.subtitle, 14,20);
-  fill(135,200,105); textSize(9); text(pd.toolTip+' | WASD mover | E interagir', 14,35);
-  let prog = objDone / max(objTotal,1);
-  fill(0,100); rect(width/2-85,10,170,28,4);
-  fill(28,100,22); rect(width/2-83,12,166*prog,24,3);
-  fill(195,255,165); textSize(11); text(pd.objLabel+': '+objDone+'/'+objTotal, width/2,28);
-  if(phaseTimer>0) { let secs = ceil(phaseTimer/60); fill(255,220,80); textSize(14); text('⏱ '+floor(secs/60)+':'+nf(secs%60,2), width-14,24); }
-  let cx=width/2, cy=height/2;
-  stroke(255,255,255,200); strokeWeight(1.5);
-  line(cx-10,cy, cx-4,cy); line(cx+4,cy, cx+10,cy);
-  line(cx,cy-10, cx,cy-4); line(cx,cy+4, cx,cy+10);
+  var pd = PHASE_DATA[currentPhase];
+  fill(0, 195); rect(0, 0, width, 48);
+  fill(175, 248, 140); textSize(12); text(pd.name + ' — ' + pd.subtitle, 14, 20);
+  fill(135, 200, 105); textSize(9); text(pd.toolTip + ' | WASD mover | E interagir', 14, 35);
+  var prog = objDone / max(objTotal, 1);
+  fill(0, 100); rect(width/2 - 85, 10, 170, 28, 4);
+  fill(28, 100, 22); rect(width/2 - 83, 12, 166 * prog, 24, 3);
+  fill(195, 255, 165); textSize(11); text(pd.objLabel + ': ' + objDone + ' / ' + objTotal, width/2, 28);
+  if (phaseTimer > 0) {
+    var secs = ceil(phaseTimer / 60);
+    fill(255, 220, 80); textSize(14); text('⏱ ' + floor(secs/60) + ':' + nf(secs%60, 2), width - 14, 24);
+  }
+  // Mira simples
+  var cx = width/2, cy = height/2;
+  stroke(255, 255, 255, 200); strokeWeight(1.5);
+  line(cx - 10, cy, cx - 4, cy); line(cx + 4, cy, cx + 10, cy);
+  line(cx, cy - 10, cx, cy - 4); line(cx, cy + 4, cx, cy + 10);
   noStroke();
-  fill(0,120); rect(width-124,52,110,13,3);
-  fill(player.running ? color(255,175,0) : color(65,195,65)); rect(width-122,54, player.stamina,9,2);
-  fill(195,200,175); textSize(9); text('STAMINA', width-14,58);
-  fill(0,160); rect(0,height-26,width,26);
-  fill(145,195,115); textSize(8); text('WASD/Setas mover | E interagir | ESC pausar', 14, height-13);
+  // Stamina
+  fill(0, 120); rect(width - 124, 52, 110, 13, 3);
+  fill(player.running ? color(255, 175, 0) : color(65, 195, 65)); rect(width - 122, 54, player.stamina, 9, 2);
+  fill(195, 200, 175); textSize(9); text('STAMINA', width - 14, 58);
+  // Rodapé
+  fill(0, 160); rect(0, height - 26, width, 26);
+  fill(145, 195, 115); textSize(8); text('WASD/Setas mover | E interagir | ESC pausar', 14, height - 13);
 }
 
-function desenharDialogo() {
-  if(!dialogNPC) return;
-  let lines = DIALOGUES[currentPhase][dialogNPC.dialogSet] || [];
-  if(dialogLine >= lines.length) { dialogActive=false; dialogNPC=null; return; }
-  fill(0,220); rect(0,height-118,width,118);
-  stroke(65,150,50); line(0,height-118,width,height-118); noStroke();
-  fill(235,230,212); textSize(12); text(lines[dialogLine], 20, height-70);
-  fill(135,195,115); textSize(9); text('[E] Próximo', width-40, height-12);
-}
-
-function desenharPickupFx() {
-  let prog = 1 - pickupAnim/45, alpha = map(pickupAnim,45,0,255,0), scale2 = 1+prog*0.5;
-  fill(115,255,115,alpha*0.32); ellipse(width/2,height/2,82*scale2,82*scale2);
-  fill(195,255,175,alpha); textSize(16); text('+1 '+PHASE_DATA[currentPhase].tool, width/2, height/2-42-prog*18);
-  if(objDone>=objTotal && !phaseWin) { fill(255,255,100,alpha); textSize(20); text('FASE COMPLETA!', width/2, height/2-72-prog*14); }
-}
-
+// ═════════════════════════════════════════════════════════════
+// PAUSE
+// ═════════════════════════════════════════════════════════════
 function desenharPause() {
-  fill(0,200); rect(0,0,width,height);
-  fill(215,255,175); textSize(42); text('PAUSADO', width/2, height/4);
-  let opts = ['▶ CONTINUAR','↺ REINICIAR','≡ SELECIONAR','✕ MENU'];
-  for(let i=0;i<4;i++) {
-    let y = height/2 + i*50;
-    fill(pauseOpt===i?35:14, pauseOpt===i?105:38, pauseOpt===i?25:12);
-    rect(width/2-120, y-20, 240,40,8);
-    fill(pauseOpt===i?255:200); textSize(14); text(opts[i], width/2, y);
+  renderizarCena3D();
+  noStroke(); fill(0, 195); rect(0, 0, width, height);
+  textFont('Courier New'); textAlign(CENTER, CENTER); textStyle(BOLD);
+  fill(215, 255, 175); textSize(42); text('PAUSADO', width / 2, height * 0.24);
+  textStyle(NORMAL); fill(145, 195, 115, 175); textSize(12);
+  text(PHASE_DATA[currentPhase].name + ' — ' + PHASE_DATA[currentPhase].subtitle, width / 2, height * 0.35);
+  var opts = ['▶  CONTINUAR', '↺  REINICIAR FASE', '≡  SELECIONAR FASE', '✕  MENU PRINCIPAL'];
+  for (var i = 0; i < opts.length; i++) {
+    var by = height * 0.44 + i * 52;
+    var sel = pauseOpt === i;
+    noStroke(); fill(0, 80); rect(width / 2 - 145, by - 22, 290, 42, 8);
+    fill(sel ? color(35, 105, 25, 238) : color(14, 38, 12, 188)); stroke(sel ? color(95, 215, 75) : color(52, 118, 48), sel ? 210 : 115); strokeWeight(sel ? 2 : 1);
+    rect(width / 2 - 143, by - 20, 286, 38, 6); noStroke();
+    fill(sel ? color(205, 255, 160) : color(150, 205, 115)); textStyle(sel ? BOLD : NORMAL); textSize(15);
+    text(opts[i], width / 2, by); textStyle(NORMAL);
+  }
+  fill(115, 175, 95, 155); textSize(10);
+  text('↑↓ navegar  |  ENTER confirmar  |  ESC continuar', width / 2, height - 20);
+}
+
+// ═════════════════════════════════════════════════════════════
+// WIN
+// ═════════════════════════════════════════════════════════════
+function desenharWin() {
+  noStroke(); for (var y = 0; y < height; y++) { var t = map(y, 0, height, 0, 1); stroke(lerp(18, 52, t), lerp(52, 128, t), lerp(18, 46, t)); line(0, y, width, y); }
+  noStroke();
+  for (var i = 0; i < 50; i++) {
+    var px2 = noise(i * 3.1, frameCount * 0.02) * width; var py2 = noise(i * 2.5, frameCount * 0.015) * height;
+    var c2 = [[255, 220, 60], [80, 255, 120], [60, 180, 255], [255, 100, 200]][i % 4];
+    fill(c2[0], c2[1], c2[2], 130 + sin(frameCount * 0.15 + i) * 80);
+    ellipse(px2, py2, 4 + noise(i) * 7);
+  }
+  textFont('Courier New'); textAlign(CENTER, CENTER); textStyle(BOLD);
+  fill(220, 255, 160); textSize(46); text('FASE CONCLUÍDA!', width / 2, height * 0.22);
+  textStyle(NORMAL); fill(180, 235, 130); textSize(20);
+  text(PHASE_DATA[currentPhase].name + ' — ' + PHASE_DATA[currentPhase].subtitle, width / 2, height * 0.37);
+  noStroke(); fill(0, 100); rect(width / 2 - 165, height * 0.43, 330, 40, 6);
+  fill(115, 235, 95); textStyle(BOLD); textSize(14);
+  text(PHASE_DATA[currentPhase].objLabel + ': ' + objDone + ' / ' + objTotal + ' ✓', width / 2, height * 0.45); textStyle(NORMAL);
+  if (currentPhase < 5) { noStroke(); fill(0, 115); rect(width / 2 - 175, height * 0.58, 350, 34, 6); fill(75, 215, 255); textSize(13); text('🔓 ' + PHASE_DATA[currentPhase + 1].name + ' desbloqueada!', width / 2, height * 0.597); }
+  var pulseA = 200 + sin(frameCount * 0.1) * 55; noStroke();
+  if (currentPhase < 5) { fill(75, 215, 75, pulseA); textStyle(BOLD); textSize(15); text('[ESPAÇO] Próxima Fase  |  [ESC] Selecionar Fase', width / 2, height * 0.77); }
+  else { fill(255, 215, 55, pulseA); textStyle(BOLD); textSize(15); text('[ESPAÇO] Ver Encerramento', width / 2, height * 0.77); }
+  textStyle(NORMAL);
+}
+
+// ═════════════════════════════════════════════════════════════
+// ENDING
+// ═════════════════════════════════════════════════════════════
+function executarEnding() {
+  csFrame++;
+  if (csIdx >= ENDING_SCENES.length) { campaignActive = false; campaignState = 'levelSelect'; if (document.exitPointerLock) document.exitPointerLock(); return; }
+  var sc = ENDING_SCENES[csIdx];
+  var dur = sc[2];
+  var fadeAl = csFrame < 45 ? map(csFrame, 0, 45, 0, 255) : csFrame > dur - 45 ? map(csFrame, dur - 45, dur, 255, 0) : 255;
+  desenharCutsceneBg(5, fadeAl);
+  var panH = 155;
+  noStroke(); fill(0, fadeAl * 0.9); rect(0, height - panH, width, panH);
+  stroke(78, 180, 75, fadeAl * 0.5); strokeWeight(1); line(0, height - panH, width, height - panH); noStroke();
+  desenharRetratoCompleto(sc[0], 58, height - panH / 2, fadeAl);
+  var ni = getNomeInfo(sc[0]);
+  fill(ni.r, ni.g, ni.b, fadeAl); textFont('Courier New'); textStyle(BOLD); textSize(12); textAlign(LEFT, CENTER);
+  text(ni.nome, 110, height - panH + 18);
+  textStyle(NORMAL); fill(232, 225, 210, fadeAl); textSize(13); textAlign(LEFT, TOP);
+  var palavras = sc[1].split(' '); var linha = ''; var linhas = [];
+  for (var i = 0; i < palavras.length; i++) { var te = linha + (linha === '' ? '' : ' ') + palavras[i]; if (textWidth(te) > width - 128) { linhas.push(linha); linha = palavras[i]; } else linha = te; } linhas.push(linha);
+  for (var i = 0; i < min(linhas.length, 4); i++) text(linhas[i], 110, height - panH + 36 + i * 22);
+  if (csIdx >= ENDING_SCENES.length - 1 && csFrame > dur - 80) {
+    var credA = map(csFrame, dur - 80, dur, 0, 248);
+    noStroke(); fill(0, credA * 0.72); rect(width * 0.15, height * 0.22, width * 0.70, 118, 8);
+    fill(255, 235, 100, credA); textStyle(BOLD); textSize(22); textAlign(CENTER, CENTER); text('AGRINHO 2026', width / 2, height * 0.30);
+    textStyle(NORMAL); textSize(14); fill(195, 240, 160, credA); text('Agro forte, futuro sustentável', width / 2, height * 0.37);
+    fill(145, 195, 125, credA * 0.8); textSize(11);
+    text('Tema: Equilíbrio entre produção e meio ambiente', width / 2, height * 0.44);
+    fill(120, 180, 100, credA * 0.8); text('[ESC] Voltar ao menu principal', width / 2, height * 0.51);
+  }
+  noStroke(); fill(65, 155, 50, fadeAl * 0.5); rect(0, height - 4, width, 4);
+  fill(95, 195, 75, fadeAl); rect(0, height - 4, width * map(csFrame, 0, dur, 0, 1), 4);
+  if (csFrame >= dur) { csIdx++; csFrame = 0; }
+}
+
+// ═════════════════════════════════════════════════════════════
+// MODO SANDBOX
+// ═════════════════════════════════════════════════════════════
+function iniciarSandbox() {
+  sandboxActive = true;
+  sbWeather = 0; sbTool = 0; sbWeatherTimer = 0; lightningFlash = 0;
+  player.x = 12; player.y = 12; player.angle = 0; player.pitch = 0;
+  player.stamina = 100; player.health = 100; player.bobTime = 0;
+  currentPhase = 5;
+  zBuf = new Float32Array(width);
+  windParts = []; for (var i = 0; i < 70; i++) windParts.push({ x: random(width), y: random(height), speed: random(2, 8), alpha: random(20, 90), len: random(15, 55), curveAmp: random(1, 4), t: random(TWO_PI) });
+  activeNPCs = [];
+  var npcs = NPC_DATA[5];
+  for (var i = 0; i < npcs.length; i++) activeNPCs.push({ charIdx: npcs[i].c, x: npcs[i].x, y: npcs[i].y, dialogSet: npcs[i].d, walkAngle: random(TWO_PI), walkTimer: 0, talking: false });
+  spots = []; objTotal = 0; objDone = 0; phaseWin = false; phaseTimer = -1;
+  dialogActive = false; dialogNPC = null;
+  initGameAudio();
+  if (cnvElt && cnvElt.requestPointerLock) cnvElt.requestPointerLock();
+}
+
+function executarSandbox() {
+  sbWeatherTimer++;
+  var sbPD = {
+    night: sbWeather === 2 || sbWeather === 3,
+    fogDist: sbWeather === 3 ? 6 : (sbWeather === 2 ? 8 : 16),
+    fogDensity: sbWeather === 3 ? 0.15 : (sbWeather === 2 ? 0.08 : 0.05),
+    fogR: sbWeather === 3 ? 20 : (sbWeather === 2 ? 12 : 150),
+    fogG: sbWeather === 3 ? 20 : (sbWeather === 2 ? 22 : 210),
+    fogB: sbWeather === 3 ? 30 : (sbWeather === 2 ? 14 : 240),
+    skyTop: sbWeather === 0 ? [82, 205, 252] : sbWeather === 1 ? [88, 100, 115] : sbWeather === 2 ? [8, 12, 28] : [22, 22, 30],
+    skyBot: sbWeather === 0 ? [42, 165, 222] : sbWeather === 1 ? [55, 70, 85] : sbWeather === 2 ? [4, 8, 20] : [14, 14, 22],
+    floorTop: sbWeather === 0 ? [55, 148, 55] : sbWeather === 1 ? [42, 110, 42] : [32, 100, 32],
+    floorBot: sbWeather === 0 ? [32, 100, 32] : sbWeather === 1 ? [25, 78, 25] : [18, 65, 18],
+    wallR: 68, wallG: 152, wallB: 68
+  };
+  PHASE_DATA[5].night = sbPD.night;
+  PHASE_DATA[5].fogDist = sbPD.fogDist;
+  PHASE_DATA[5].fogDensity = sbPD.fogDensity;
+  PHASE_DATA[5].fogR = sbPD.fogR;
+  PHASE_DATA[5].fogG = sbPD.fogG;
+  PHASE_DATA[5].fogB = sbPD.fogB;
+  for (var ii = 0; ii < 3; ii++) { PHASE_DATA[5].skyTop[ii] = sbPD.skyTop[ii]; PHASE_DATA[5].skyBot[ii] = sbPD.skyBot[ii]; PHASE_DATA[5].floorTop[ii] = sbPD.floorTop[ii]; PHASE_DATA[5].floorBot[ii] = sbPD.floorBot[ii]; }
+  atualizarPlayer();
+  atualizarNPCs();
+  renderizarCena3D();
+  renderizarSprites();
+  desenharVento();
+  if (sbWeather === 3) {
+    stroke(180, 200, 255, 100); strokeWeight(1);
+    for (var i = 0; i < stormParts.length; i++) {
+      var p = stormParts[i]; p.y += p.spd; if (p.y > height) { p.y = -p.len; p.x = random(width); }
+      line(p.x, p.y, p.x - 3, p.y + p.len);
+    }
+    noStroke();
+    lightningFlash = max(0, lightningFlash - 3);
+    if (random() < 0.008) { lightningFlash = 255; }
+    if (lightningFlash > 0) { fill(255, 255, 255, lightningFlash * 0.3); rect(0, 0, width, height); }
+  }
+  desenharBracos();
+  hudSandbox();
+  if (dialogActive) desenharDialogo();
+}
+
+function hudSandbox() {
+  noStroke(); fill(0, 195); rect(0, 0, width, 48);
+  fill(255, 200, 80); textFont('Courier New'); textStyle(BOLD); textSize(13); textAlign(LEFT, CENTER);
+  text('SANDBOX — MODO LIVRE', 14, 14);
+  textStyle(NORMAL); fill(180, 180, 140, 180); textSize(9);
+  text('WASD mover  |  Mouse câmera  |  C = clima  |  1-6 = ferramenta  |  ESC = sair', 14, 30);
+  noStroke(); fill(0, 150); rect(width - 200, 8, 188, 30, 4);
+  var wCors = [[255, 220, 60], [160, 180, 200], [80, 120, 220], [80, 100, 180]];
+  fill(wCors[sbWeather][0], wCors[sbWeather][1], wCors[sbWeather][2]);
+  textStyle(BOLD); textSize(11); textAlign(RIGHT, CENTER);
+  text(SB_WEATHER_NAMES[sbWeather], width - 14, 23); textStyle(NORMAL);
+  noStroke(); fill(0, 150); rect(width / 2 - 85, 8, 170, 30, 4);
+  fill(120, 255, 100); textAlign(CENTER, CENTER); textStyle(BOLD); textSize(11);
+  text('TOOL: ' + ['SCANNER', 'NOTURNO', 'HACKEAR', 'COLETOR', 'PLANTIO', 'DRONE'][sbTool], width / 2, 23); textStyle(NORMAL);
+  noStroke(); fill(0, 160); rect(0, height - 30, width, 30);
+  for (var i = 0; i < 6; i++) {
+    var bx = 14 + i * 128;
+    fill(sbTool === i ? color(40, 120, 30, 230) : color(20, 50, 15, 180));
+    rect(bx, height - 26, 120, 22, 4);
+    fill(sbTool === i ? color(220, 255, 160) : color(130, 185, 100));
+    textFont('Courier New'); textSize(9); textAlign(CENTER, CENTER); textStyle(BOLD);
+    text('[' + (i + 1) + '] ' + ['SCANNER', 'NOTURNO', 'HACKEAR', 'COLETOR', 'PLANTIO', 'DRONE'][i], bx + 60, height - 15);
+  }
+  textStyle(NORMAL);
+  fill(0, 120); rect(width - 124, 52, 110, 13, 3); noStroke();
+  fill(player.running ? color(255, 175, 0) : color(65, 195, 65)); rect(width - 122, 54, player.stamina * 1.06, 9, 2);
+  fill(180, 195, 155); textFont('Courier New'); textSize(9); textAlign(RIGHT, CENTER); text('STAMINA', width - 14, 58);
+}
+
+// ═════════════════════════════════════════════════════════════
+// MODO PLANTAÇÃO — Simulador 2D top-down
+// ═════════════════════════════════════════════════════════════
+function iniciarPlantacao() {
+  plantGrid = [];
+  for (var r = 0; r < PLANT_ROWS; r++) for (var c = 0; c < PLANT_COLS; c++) plantGrid.push({ col: c, row: r, stage: 0, pH: random(4.5, 8.0), water: random(20, 80), type: 0, pestTime: 0, hasPest: false, growTimer: 0 });
+  plantResources = { agua: 100, creditos: 100, solo: 100, sementes: 30 };
+  plantTool = 0; plantMsg = ''; plantMsgTimer = 0; plantEfficiency = 0; plantWin = false;
+  plantCursor = { col: 0, row: 0 };
+}
+
+function executarPlantacao() {
+  for (var y = 0; y < height; y++) { var t = y / height; stroke(lerp(30, 18, t), lerp(90, 55, t), lerp(30, 15, t)); line(0, y, width, y); }
+  noStroke();
+  desenharSol(width - 60, 50, 28);
+  noStroke(); fill(0, 200); rect(0, 0, width, 42);
+  fill(120, 255, 100); textFont('Courier New'); textStyle(BOLD); textAlign(CENTER, CENTER); textSize(16);
+  text('PLANTAÇÃO — SIMULADOR AGRÍCOLA', width / 2, 21); textStyle(NORMAL);
+  var rY = 48;
+  var recursos = [
+    { label: '💧 ÁGUA', val: plantResources.agua, r: 60, g: 120, b: 255 },
+    { label: '🌿 CRÉDITOS', val: plantResources.creditos, r: 60, g: 200, b: 80 },
+    { label: '🌱 SOLO', val: plantResources.solo, r: 180, g: 140, b: 60 },
+    { label: '🌾 SEMENTES', val: plantResources.sementes, r: 220, g: 200, b: 80 }
+  ];
+  for (var i = 0; i < recursos.length; i++) {
+    var rx = 8 + i * (width / 4);
+    noStroke(); fill(0, 150); rect(rx, rY, width / 4 - 8, 28, 4);
+    fill(recursos[i].r, recursos[i].g, recursos[i].b); rect(rx + 2, rY + 16, max(0, (width / 4 - 12) * (recursos[i].val / 100)), 8, 2);
+    fill(200, 220, 180); textFont('Courier New'); textSize(9); textAlign(LEFT, CENTER); textStyle(BOLD);
+    text(recursos[i].label + ' ' + floor(recursos[i].val), rx + 4, rY + 8); textStyle(NORMAL);
+  }
+  var gridOffX = 40, gridOffY = 90, cellW = 68, cellH = 52;
+  for (var i = 0; i < plantGrid.length; i++) {
+    var cell = plantGrid[i];
+    var cx2 = gridOffX + cell.col * cellW, cy2 = gridOffY + cell.row * cellH;
+    var sel = (cell.col === plantCursor.col && cell.row === plantCursor.row);
+    var soilDark = map(cell.pH, 4, 8, 0.5, 1.0);
+    var soilR = int(lerp(100, 70, 1 - soilDark)), soilG = int(lerp(55, 100, soilDark)), soilB = int(lerp(20, 35, soilDark));
+    noStroke(); fill(soilR, soilG, soilB); rect(cx2, cy2, cellW - 4, cellH - 4, 4);
+    if (cell.water > 60) { fill(60, 120, 255, 30); rect(cx2, cy2, cellW - 4, cellH - 4, 4); }
+    desenharPlanta(cx2 + cellW / 2 - 2, cy2 + cellH - 8, cell.stage, cell.type, frameCount);
+    if (cell.hasPest) { fill(255, 80, 40, 180 + sin(frameCount * 0.2) * 50); ellipse(cx2 + cellW - 12, cy2 + 10, 12, 12); fill(0); textSize(9); textAlign(CENTER, CENTER); textFont('Courier New'); text('!', cx2 + cellW - 12, cy2 + 10); }
+    fill(200, 180, 120); textSize(8); textAlign(LEFT, TOP); textFont('Courier New');
+    text('pH:' + (cell.pH).toFixed(1), cx2 + 2, cy2 + 2);
+    if (sel) { stroke(120, 255, 80); strokeWeight(2); noFill(); rect(cx2, cy2, cellW - 4, cellH - 4, 4); noStroke(); }
+    if (cell.water < 20) { stroke(60, 120, 255, 180); strokeWeight(1.5); line(cx2 + 2, cy2 + cellH - 8, cx2 + 2 + (cell.water / 100) * (cellW - 8), cy2 + cellH - 8); noStroke(); }
+    if (cell.stage > 0 && cell.stage < 5 && cell.water > 30 && cell.pH > 5.5 && cell.pH < 7.5 && !cell.hasPest) {
+      cell.growTimer++;
+      if (cell.growTimer > 240) { cell.stage = min(5, cell.stage + 1); cell.growTimer = 0; if (cell.stage === 5) plantResources.creditos = min(100, plantResources.creditos + 4); }
+    }
+    if (frameCount % 120 === 0) cell.water = max(0, cell.water - random(1, 4));
+    if (!cell.hasPest && cell.stage > 1 && random() < 0.0005) cell.hasPest = true;
+  }
+  var selCell = plantGrid[plantCursor.row * PLANT_COLS + plantCursor.col];
+  if (selCell) {
+    var panY = height - 78;
+    noStroke(); fill(0, 200); rect(0, panY, width, 78);
+    stroke(60, 160, 50, 150); strokeWeight(1); line(0, panY, width, panY); noStroke();
+    fill(200, 255, 160); textFont('Courier New'); textStyle(BOLD); textSize(11); textAlign(LEFT, CENTER);
+    var stageNames = ['Solo vazio', 'Arado', 'Semeado', 'Brotando', 'Crescendo', 'Maduro'];
+    text('PARCELA (' + selCell.col + ',' + selCell.row + ') — ' + stageNames[selCell.stage], 14, panY + 14);
+    textStyle(NORMAL); fill(180, 220, 140); textSize(10);
+    text('Umidade: ' + floor(selCell.water) + '%  |  pH: ' + selCell.pH.toFixed(1) + (selCell.pH < 5.5 ? ' [ÁCIDO - use calcário]' : selCell.pH > 7.5 ? ' [ALCALINO - use enxofre]' : '  [IDEAL]'), 14, panY + 30);
+    if (selCell.hasPest) text('⚠ PRAGA DETECTADA — Use Bioinsumo para eliminar', 14, panY + 46);
+    fill(120, 200, 100); text('[ESPAÇO] Usar ferramenta: ' + PLANT_TOOLS[plantTool] + '   |   ↑↓←→ mover cursor   |   1-5 ferramenta   |   ESC sair', 14, panY + 62);
+  }
+  noStroke(); fill(0, 170); rect(0, height - 78 - 32, width, 32);
+  for (var i = 0; i < PLANT_TOOLS.length; i++) {
+    var bx2 = 10 + i * 160;
+    fill(plantTool === i ? color(35, 115, 25, 235) : color(12, 42, 10, 188)); stroke(plantTool === i ? color(90, 210, 70) : color(45, 110, 38), plantTool === i ? 2 : 1); strokeWeight(plantTool === i ? 2 : 1);
+    rect(bx2, height - 78 - 30, 150, 26, 5); noStroke();
+    fill(plantTool === i ? color(215, 255, 155) : color(140, 200, 100)); textFont('Courier New'); textStyle(BOLD); textSize(10); textAlign(CENTER, CENTER);
+    text('[' + (i + 1) + '] ' + PLANT_TOOLS[i], bx2 + 75, height - 78 - 17);
+  }
+  textStyle(NORMAL);
+  plantEfficiency = calcularEficiencia();
+  noStroke(); fill(0, 150); rect(gridOffX + PLANT_COLS * cellW + 8, 90, width - gridOffX - PLANT_COLS * cellW - 18, 380, 6);
+  fill(120, 220, 100); textFont('Courier New'); textStyle(BOLD); textSize(11); textAlign(CENTER, CENTER);
+  text('EFICIÊNCIA\nECOLÓGICA', gridOffX + PLANT_COLS * cellW + 50, 108);
+  textStyle(NORMAL);
+  var barX = gridOffX + PLANT_COLS * cellW + 30, barY = 125, barH = 220;
+  noStroke(); fill(20, 40, 15); rect(barX, barY, 40, barH, 4);
+  var eff = min(plantEfficiency, 100);
+  fill(eff > 70 ? color(80, 220, 80) : eff > 40 ? color(220, 200, 60) : color(220, 80, 60));
+  rect(barX, barY + barH * (1 - eff / 100), 40, barH * (eff / 100), 4);
+  fill(255, 255, 255); textSize(14); text(floor(eff) + '%', barX + 20, barY + barH + 18);
+  var tips = ['🌱 Ara antes\nde semear', '💧 Irriga com\ncuidado', '🌿 Bioinsumo\nbate pragas', '📊 pH 6-7\n= ideal'];
+  fill(160, 210, 120); textSize(8);
+  for (var i = 0; i < tips.length; i++) text(tips[i], barX + 20, barY + barH + 42 + i * 32);
+  if (plantMsgTimer > 0) {
+    plantMsgTimer--;
+    var msgA = min(plantMsgTimer * 8, 200);
+    noStroke(); fill(0, msgA * 0.8); rect(width / 2 - 160, height / 2 - 20, 320, 38, 6);
+    fill(120, 255, 120, msgA); textFont('Courier New'); textAlign(CENTER, CENTER); textStyle(BOLD); textSize(13);
+    text(plantMsg, width / 2, height / 2 + 2); textStyle(NORMAL);
+  }
+  if (eff >= 80 && !plantWin) {
+    plantWin = true;
+    plantMsg = '🏆 LAVOURA CERTIFICADA! Eficiência: ' + floor(eff) + '%'; plantMsgTimer = 240;
   }
 }
 
-function desenharWin() {
-  background(30,80,30);
-  fill(220,255,160); textSize(46); text('FASE CONCLUÍDA!', width/2, height/3);
-  fill(180,235,130); textSize(20); text(PHASE_DATA[currentPhase].name, width/2, height/2);
-  fill(115,235,95); textSize(14); text('Objetivos: '+objDone+'/'+objTotal, width/2, height/2+40);
-  if(currentPhase<5) { fill(75,215,255); textSize(13); text('[ESPAÇO] Próxima Fase', width/2, height-60); }
-  else { fill(255,215,55); text('[ESPAÇO] Ver Encerramento', width/2, height-60); }
-  text('[ESC] Selecionar Fase', width/2, height-35);
+function calcularEficiencia() {
+  var total = 0;
+  for (var i = 0; i < plantGrid.length; i++) {
+    var c = plantGrid[i];
+    var score = 0;
+    if (c.stage > 0) score += c.stage * 15;
+    if (c.pH > 5.5 && c.pH < 7.5) score += 10;
+    if (c.water > 30 && c.water < 90) score += 10;
+    if (!c.hasPest) score += 5;
+    total += score;
+  }
+  return total / (plantGrid.length * 85) * 100;
 }
 
-function executarEnding() {
-  csFrame++;
-  if(csIdx >= ENDING_SCENES.length) { campaignActive=false; campaignState='levelSelect'; return; }
-  let sc = ENDING_SCENES[csIdx], dur = sc[2];
-  background(20,60,30);
-  fill(0,220); rect(0,height-140,width,140);
-  fill(255); textSize(16); text(sc[0].toUpperCase(), 20, height-100);
-  fill(220); textSize(12); text(sc[1], 20, height-60);
-  if(csFrame >= dur) { csIdx++; csFrame=0; }
+function usarFerramentaPlanta() {
+  var idx = plantCursor.row * PLANT_COLS + plantCursor.col;
+  if (idx < 0 || idx >= plantGrid.length) return;
+  var cell = plantGrid[idx];
+  if (plantTool === 0) {
+    plantMsg = 'pH:' + cell.pH.toFixed(1) + ' Umidade:' + floor(cell.water) + '% Estágio:' + cell.stage; plantMsgTimer = 180;
+  } else if (plantTool === 1) {
+    if (cell.stage === 0) { cell.stage = 1; cell.pH = constrain(cell.pH + random(-0.2, 0.4), 5.5, 7.5); plantResources.solo = max(0, plantResources.solo - 2); plantMsg = 'Solo arado! pH ajustado.'; plantMsgTimer = 120; }
+    else { plantMsg = 'Solo já preparado!'; plantMsgTimer = 100; }
+  } else if (plantTool === 2) {
+    if (cell.stage === 1 && plantResources.sementes >= 3) { cell.stage = 2; plantResources.sementes -= 3; plantMsg = '🌱 Semeado com sucesso!'; plantMsgTimer = 120; }
+    else if (plantResources.sementes < 3) { plantMsg = 'Sementes insuficientes!'; plantMsgTimer = 120; }
+    else { plantMsg = 'Are o solo primeiro!'; plantMsgTimer = 120; }
+  } else if (plantTool === 3) {
+    if (plantResources.agua >= 8) { cell.water = min(100, cell.water + 20); plantResources.agua -= 8; plantMsg = '💧 Parcela irrigada!'; plantMsgTimer = 120; }
+    else { plantMsg = 'Água insuficiente!'; plantMsgTimer = 120; }
+  } else if (plantTool === 4) {
+    if (cell.hasPest && plantResources.creditos >= 10) { cell.hasPest = false; plantResources.creditos -= 10; plantMsg = '✅ Praga eliminada com bioinsumo!'; plantMsgTimer = 150; }
+    else if (!cell.hasPest) { plantMsg = 'Sem pragas aqui.'; plantMsgTimer = 100; }
+    else { plantMsg = 'Créditos verdes insuficientes!'; plantMsgTimer = 120; }
+  }
+}
+
+function desenharPlanta(x, y, stage, tipo, fc) {
+  noStroke();
+  if (stage === 0) return;
+  if (stage === 1) { fill(80, 55, 25); for (var i = -2; i <= 2; i++) ellipse(x + i * 5, y, 4, 3); return; }
+  if (stage === 2) { fill(80, 140, 40); ellipse(x, y - 2, 6, 8); fill(60, 100, 30); rect(x - 1, y - 2, 2, 8); return; }
+  if (stage === 3) { fill(60, 170, 50); beginShape(); vertex(x, y - 14); vertex(x - 6, y); vertex(x + 6, y); endShape(CLOSE); fill(80, 130, 40); rect(x - 1, y - 14, 2, 14); return; }
+  if (stage === 4) { fill(50, 180, 40); for (var i = -1; i <= 1; i++) { beginShape(); vertex(x + i * 8, y - 18 - abs(i) * 4); vertex(x + i * 8 - 7, y - 4); vertex(x + i * 8 + 7, y - 4); endShape(CLOSE); } fill(70, 140, 38); rect(x - 2, y - 8, 4, 8); return; }
+  if (stage >= 5) {
+    fill(40, 160, 38); for (var i = -1; i <= 1; i++) { beginShape(); vertex(x + i * 9, y - 28 - abs(i) * 5); vertex(x + i * 9 - 8, y - 6); vertex(x + i * 9 + 8, y - 6); endShape(CLOSE); }
+    fill(70, 130, 38); rect(x - 2, y - 10, 4, 10);
+    fill(240, 220, 40); ellipse(x + 5, y - 20, 8, 16);
+    fill(220, 200, 30); for (var i = 0; i < 5; i++) ellipse(x + 5, y - 25 + i * 3, 6, 3);
+    fill(100, 160, 50); for (var i = 0; i < 4; i++) line(x + 5 + 6, y - 22 + i * 3.5, x + 5 + 12, y - 25 + i * 3.5);
+    return;
+  }
+}
+
+// ═════════════════════════════════════════════════════════════
+// INPUT
+// ═════════════════════════════════════════════════════════════
+function mousePressed() {
+  if (estadoTela === 0) { userStartAudio(); osciladorFundo.start(); mudarEstado(1); return; }
+  if (estadoTela === 4 && !trailerAtivo && !campaignActive && !sandboxActive && !plantActive) {
+    var bW = 210, bH = 52, bGap = 18, totalW = 3 * bW + 2 * bGap, bX0 = (width - totalW) / 2, bY = height / 2 + 10;
+    for (var i = 0; i < 3; i++) {
+      var bx = bX0 + i * (bW + bGap);
+      if (mouseX > bx && mouseX < bx + bW && mouseY > bY && mouseY < bY + bH) {
+        if (i === 0) { campaignActive = true; campaignState = 'levelSelect'; }
+        else if (i === 1) { iniciarSandbox(); }
+        else { plantActive = true; iniciarPlantacao(); }
+        return;
+      }
+    }
+    return;
+  }
+  if (campaignActive) {
+    if (campaignState === 'preCutscene') { avancarCutscene(); return; }
+    if (campaignState === 'levelSelect') {
+      var cols = 3, bw = 238, bh = 105, gx = (width - cols * bw - (cols - 1) * 14) / 2, gy = 62;
+      for (var i = 0; i < 6; i++) {
+        var col = i % cols, row = floor(i / cols), bx = gx + col * (bw + 14), by = gy + row * (bh + 12);
+        if (mouseX > bx && mouseX < bx + bw && mouseY > by && mouseY < by + bh && phasesUnlocked[i]) { iniciarFase(i); return; }
+      }
+    }
+    if (campaignState === 'gameplay' && dialogActive) {
+      dialogLine++;
+      var d = DIALOGUES[currentPhase][dialogNPC.dialogSet] || [];
+      if (dialogLine >= d.length) { dialogActive = false; if (dialogNPC) dialogNPC.talking = false; dialogNPC = null; }
+      return;
+    }
+  }
+}
+
+function keyPressed() {
+  keys[key] = true;
+  if (estadoTela === 3) {
+    osciladorFundo.stop();
+    var primeira = true;
+    try { primeira = localStorage.getItem('agrinho2026_trailer') !== '1'; } catch (e) { }
+    if (primeira) { iniciarMusicaTrailer(); musicAtiva = true; musicFrame = 0; proxNota = 0; proxAcorde = ACORDE_DUR; proxKick = 120; melodiaIdx = 0; acordeAtual = 0; if (padOscs.length > 0) { for (var i = 0; i < padOscs.length; i++) padOscs[i].amp(0.045, 1.5); if (bassOsc) bassOsc.amp(0.08, 1.5); } trailerAtivo = true; }
+    mudarEstado(4); return;
+  }
+  if (estadoTela === 4 && trailerAtivo) { finalizarTrailer(); return; }
+  if (estadoTela === 4 && !trailerAtivo && !campaignActive && !sandboxActive && !plantActive) {
+    if (key === 'r' || key === 'R') {
+      trailerFrame = 0; cam1 = 0; cam2 = 0; cam2b = 0;
+      for (var i = 0; i < graos.length; i++) { graos[i].y = random(-600, -5); graos[i].ativo = true; }
+      iniciarMusicaTrailer(); musicAtiva = true; musicFrame = 0; proxNota = 0; proxAcorde = ACORDE_DUR; proxKick = 120; melodiaIdx = 0; acordeAtual = 0;
+      if (padOscs.length > 0) { for (var i = 0; i < padOscs.length; i++) padOscs[i].amp(0.045, 1.5); if (bassOsc) bassOsc.amp(0.08, 1.5); } trailerAtivo = true;
+    }
+    return;
+  }
+  if (sandboxActive) {
+    if (keyCode === ESCAPE) { sandboxActive = false; if (document.exitPointerLock) document.exitPointerLock(); return; }
+    if (key === 'c' || key === 'C') { sbWeather = (sbWeather + 1) % 4; return; }
+    if (key >= '1' && key <= '6') { sbTool = parseInt(key) - 1; return; }
+    if (campaignState === 'gameplay' && dialogActive) {
+      if (key === 'e' || key === 'E') { dialogLine++; var d = DIALOGUES[currentPhase][dialogNPC.dialogSet] || []; if (dialogLine >= d.length) { dialogActive = false; if (dialogNPC) dialogNPC.talking = false; dialogNPC = null; } }
+    }
+    return;
+  }
+  if (plantActive) {
+    if (keyCode === ESCAPE) { plantActive = false; return; }
+    if (key >= '1' && key <= '5') { plantTool = parseInt(key) - 1; return; }
+    if (keyCode === 32) { usarFerramentaPlanta(); return; }
+    if (keyCode === LEFT_ARROW) { plantCursor.col = max(0, plantCursor.col - 1); return; }
+    if (keyCode === RIGHT_ARROW) { plantCursor.col = min(PLANT_COLS - 1, plantCursor.col + 1); return; }
+    if (keyCode === UP_ARROW) { plantCursor.row = max(0, plantCursor.row - 1); return; }
+    if (keyCode === DOWN_ARROW) { plantCursor.row = min(PLANT_ROWS - 1, plantCursor.row + 1); return; }
+    return;
+  }
+  if (!campaignActive) return;
+  if (campaignState === 'levelSelect') { if (keyCode === ESCAPE) { campaignActive = false; } return; }
+  if (campaignState === 'preCutscene') { if (keyCode === 32 || keyCode === ENTER) avancarCutscene(); return; }
+  if (campaignState === 'gameplay') {
+    if (keyCode === ESCAPE) { campaignState = 'pause'; pauseOpt = 0; if (document.exitPointerLock) document.exitPointerLock(); }
+    if ((key === 'e' || key === 'E') && dialogActive) {
+      dialogLine++; var d = DIALOGUES[currentPhase][dialogNPC.dialogSet] || [];
+      if (dialogLine >= d.length) { dialogActive = false; if (dialogNPC) dialogNPC.talking = false; dialogNPC = null; }
+    }
+    return;
+  }
+  if (campaignState === 'pause') {
+    if (keyCode === ESCAPE) campaignState = 'gameplay';
+    if (keyCode === UP_ARROW) pauseOpt = (pauseOpt + 3) % 4;
+    if (keyCode === DOWN_ARROW) pauseOpt = (pauseOpt + 1) % 4;
+    if (keyCode === ENTER || keyCode === 32) {
+      if (pauseOpt === 0) campaignState = 'gameplay';
+      else if (pauseOpt === 1) iniciarFase(currentPhase);
+      else if (pauseOpt === 2) campaignState = 'levelSelect';
+      else if (pauseOpt === 3) { campaignActive = false; if (document.exitPointerLock) document.exitPointerLock(); }
+    }
+    return;
+  }
+  if (campaignState === 'win') {
+    if (keyCode === 32 || keyCode === ENTER) { if (currentPhase < 5) iniciarFase(currentPhase + 1); else { csIdx = 0; csFrame = 0; campaignState = 'ending'; } }
+    if (keyCode === ESCAPE) campaignState = 'levelSelect';
+    return;
+  }
+  if (campaignState === 'ending') {
+    if (keyCode === ESCAPE) { campaignActive = false; if (document.exitPointerLock) document.exitPointerLock(); }
+    if (keyCode === 32 || keyCode === ENTER) csFrame = 9999;
+    return;
+  }
+}
+
+function keyReleased() {
+  keys[key] = false;
+}
+// ═════════════════════════════════════════════════════════════
+// HELPERS
+// ═════════════════════════════════════════════════════════════
+function bordaEscura() {
+  noStroke(); var M = 38;
+  for (var i = 0; i < M; i++) { var a = map(i, 0, M - 1, 65, 0); fill(0, a); rect(0, i, width, 1); rect(0, height - 1 - i, width, 1); rect(i, 0, 1, height); rect(width - 1 - i, 0, 1, height); }
+}
+
+function desenhaNuvem(x, y, w, al, pesada) {
+  noStroke();
+  var blobs = [[0, 0, 0.44, 0.23], [-0.28, 0.07, 0.30, 0.18], [0.28, 0.05, 0.30, 0.18], [-0.10, -0.10, 0.24, 0.15], [0.12, -0.08, 0.22, 0.14]];
+  for (var i = 0; i < blobs.length; i++) {
+    var ox = blobs[i][0], oy = blobs[i][1], rx = blobs[i][2], ry = blobs[i][3];
+    fill(pesada ? color(108, 115, 122, al + noise(ox, oy) * 24) : color(250, 253, 255, al - 20 + noise(ox * 10, oy * 10) * 35));
+    ellipse(x + ox * w, y + oy * w, rx * w * 2, ry * w * 2);
+  }
+  if (!pesada) { fill(170, 185, 196, al * 0.25); ellipse(x, y + w * 0.17, w * 0.52, w * 0.10); }
+}
+
+function desenhaTrator(x, y, esc) {
+  push(); translate(x, y); scale(esc); noStroke();
+  fill(28, 26, 22); ellipse(-23, 20, 38, 38); ellipse(23, 20, 38, 38);
+  fill(48, 44, 38); ellipse(-23, 20, 22, 22); ellipse(23, 20, 22, 22);
+  fill(28, 26, 22); ellipse(-40, 24, 20, 20); ellipse(40, 24, 20, 20);
+  fill(32, 52, 28); rect(-30, -12, 60, 30, 4); fill(40, 65, 34); rect(-23, -32, 46, 22, 3);
+  fill(48, 72, 40); rect(-14, -58, 28, 28, 2); fill(110, 148, 190, 72); rect(-11, -55, 22, 21, 1);
+  fill(28, 26, 22); rect(-3, -70, 6, 14, 2);
+  stroke(38, 36, 30); strokeWeight(1.5); for (var i = -3; i <= 3; i++) line(i * 9, 30, i * 9, 42);
+  noStroke(); pop();
+}
+
+function mudarEstado(s) {
+  estadoTela = s; tempoEstado = millis();
+  try { if (osciladorImpacto) { osciladorImpacto.start(); envelopeImpacto.play(osciladorImpacto); } } catch (e) { }
+}
+// ============================================================
+// BLOCO COMPLETO DAS FUNÇÕES 2D (adicione ao final do código)
+// ============================================================
+
+function executarGameplay() {
+  atualizarPlayer2D();
+  atualizarNPCs2D();
+  if (phaseTimer > 0) phaseTimer--;
+  if (phaseTimer === 0 && !phaseWin) {
+    phaseWin = true;
+    if (currentPhase < 5) phasesUnlocked[currentPhase + 1] = true;
+    saveProgress();
+  }
+  if (phaseWin) { campaignState = 'win'; return; }
+  renderizarCena2D();
+  desenharBracos2D();
+  desenharHUD2D();
+  desenharMiniMapa();
+  if (dialogActive) desenharDialogo();
+  if (pickupAnim > 0) { desenharPickupFx(); pickupAnim--; }
 }
 
 function atualizarPlayer2D() {
-  if(dialogActive) return;
-  let map2 = MAPS[currentPhase];
-  let spd = 0.12;
-  if(keyIsDown(SHIFT)) spd = 0.2;
-  if(keyIsDown(CONTROL)) spd = 0.06;
+  if (dialogActive) return;
+  var map2 = MAPS[currentPhase];
+  var spd = 0.12;
+  if (keyIsDown(SHIFT)) spd = 0.2;
+  if (keyIsDown(CONTROL)) spd = 0.06;
   player.running = keyIsDown(SHIFT);
   player.crouching = keyIsDown(CONTROL);
-  if(player.running) {
+  if (player.running) {
     player.stamina = max(0, player.stamina - 0.28);
-    if(player.stamina <= 0) spd = 0.08;
+    if (player.stamina <= 0) spd = 0.08;
   } else player.stamina = min(100, player.stamina + 0.18);
-  
-  let dx=0, dy=0;
-  if(keyIsDown(87)||keyIsDown(UP_ARROW)) dy -= spd;
-  if(keyIsDown(83)||keyIsDown(DOWN_ARROW)) dy += spd;
-  if(keyIsDown(65)||keyIsDown(LEFT_ARROW)) dx -= spd;
-  if(keyIsDown(68)||keyIsDown(RIGHT_ARROW)) dx += spd;
-  
-  if(dx!==0 || dy!==0) { player.angle = atan2(dy,dx); player.moving = true; }
-  else player.moving = false;
-  
-  let nx = player.x+dx, ny = player.y+dy, r=0.35;
-  function isWalkable(x,y) {
-    let x1=floor(x-r), x2=floor(x+r), y1=floor(y-r), y2=floor(y+r);
-    for(let iy=y1; iy<=y2; iy++)
-      for(let ix=x1; ix<=x2; ix++)
-        if(ix>=0 && ix<MAPSIZE && iy>=0 && iy<MAPSIZE && map2[iy][ix]===1) return false;
+
+  var dx = 0, dy = 0;
+  if (keyIsDown(87) || keyIsDown(UP_ARROW)) dy -= spd;
+  if (keyIsDown(83) || keyIsDown(DOWN_ARROW)) dy += spd;
+  if (keyIsDown(65) || keyIsDown(LEFT_ARROW)) dx -= spd;
+  if (keyIsDown(68) || keyIsDown(RIGHT_ARROW)) dx += spd;
+
+  if (dx !== 0 || dy !== 0) {
+    player.angle = atan2(dy, dx);
+    player.moving = true;
+  } else {
+    player.moving = false;
+  }
+
+  var nx = player.x + dx, ny = player.y + dy, r = 0.35;
+  function isWalkable(x, y) {
+    var x1 = floor(x - r), x2 = floor(x + r);
+    var y1 = floor(y - r), y2 = floor(y + r);
+    for (var iy = y1; iy <= y2; iy++) {
+      for (var ix = x1; ix <= x2; ix++) {
+        if (ix >= 0 && ix < MAPSIZE && iy >= 0 && iy < MAPSIZE && map2[iy][ix] === 1) return false;
+      }
+    }
     return true;
   }
-  if(isWalkable(nx, player.y)) player.x = nx;
-  if(isWalkable(player.x, ny)) player.y = ny;
-  
-  if(pointerLocked) { player.angle += nativeMovX*0.005; nativeMovX=0; nativeMovY=0; }
-  
-  if(keyIsDown(69) && !dialogActive && interactCool<=0) { verificarInteracao2D(); interactCool=22; }
-  if(interactCool>0) interactCool--;
-  if(player.moving) { stepTimer++; let rate = player.running?18:28; if(stepTimer%rate===0) playStep(); }
+  if (isWalkable(nx, player.y)) player.x = nx;
+  if (isWalkable(player.x, ny)) player.y = ny;
+
+  if (pointerLocked) {
+    player.angle += nativeMovX * 0.005;
+    nativeMovX = 0; nativeMovY = 0;
+  }
+
+  if (keyIsDown(69) && !dialogActive && interactCool <= 0) {
+    verificarInteracao2D();
+    interactCool = 22;
+  }
+  if (interactCool > 0) interactCool--;
+
+  if (player.moving) {
+    stepTimer++;
+    var rate = player.running ? 18 : 28;
+    if (stepTimer % rate === 0) playStep();
+  }
 }
 
 function atualizarNPCs2D() {
-  for(let n of activeNPCs) {
-    n.walkTimer++;
-    if(n.walkTimer>80 && !n.talking) {
-      n.walkAngle += random(-0.2,0.2);
-      let dx = cos(n.walkAngle)*0.03, dy = sin(n.walkAngle)*0.03;
-      let nx = n.x+dx, ny = n.y+dy;
-      let map2 = MAPS[currentPhase];
-      let tileX = floor(nx), tileY = floor(ny);
-      if(nx>1 && nx<MAPSIZE-1 && ny>1 && ny<MAPSIZE-1 && map2[tileY][tileX]!==1) {
-        n.x = nx; n.y = ny;
-      } else { n.walkAngle += PI; }
+  for (var i = 0; i < activeNPCs.length; i++) {
+    var npc = activeNPCs[i];
+    npc.walkTimer++;
+    if (npc.walkTimer > 80 && !npc.talking) {
+      npc.walkAngle += random(-0.2, 0.2);
+      var dx = cos(npc.walkAngle) * 0.03;
+      var dy = sin(npc.walkAngle) * 0.03;
+      var nx = npc.x + dx;
+      var ny = npc.y + dy;
+      var map2 = MAPS[currentPhase];
+      var tileX = floor(nx);
+      var tileY = floor(ny);
+      if (nx > 1 && nx < MAPSIZE-1 && ny > 1 && ny < MAPSIZE-1 && map2[tileY][tileX] !== 1) {
+        npc.x = nx;
+        npc.y = ny;
+      } else {
+        npc.walkAngle += PI;
+      }
     }
-    if(n.walkTimer>180) n.walkTimer=0;
+    if (npc.walkTimer > 180) npc.walkTimer = 0;
   }
 }
 
 function verificarInteracao2D() {
-  for(let n of activeNPCs) if(dist(player.x, player.y, n.x, n.y) < 2.4) { dialogActive=true; dialogNPC=n; dialogLine=0; n.talking=true; playDialog(); return; }
-  for(let s of spots) if(!s.done && dist(player.x, player.y, s.x, s.y) < 1.8) { s.done=true; objDone++; pickupAnim=45; playPickup(); if(objDone>=objTotal) { phaseWin=true; if(currentPhase<5) phasesUnlocked[currentPhase+1]=true; saveProgress(); } return; }
-}
-
-function saveProgress() { try { localStorage.setItem('agrinho2026_v8', JSON.stringify(phasesUnlocked)); } catch(e){} }
-function dist(x1,y1,x2,y2) { return sqrt((x1-x2)*(x1-x2)+(y1-y2)*(y1-y2)); }
-
-// ═════════════════════════════════════════════════════════════
-// SANDBOX
-// ═════════════════════════════════════════════════════════════
-function iniciarSandbox() {
-  sandboxActive = true;
-  player.x = 12; player.y = 12; player.angle = 0;
-  currentPhase = 5;
-  activeNPCs = [];
-  spots = [];
-  initGameAudio();
-  if(cnvElt && cnvElt.requestPointerLock) cnvElt.requestPointerLock();
-}
-
-function executarSandbox() {
-  atualizarPlayer2D();
-  renderizarCena2D();
-  desenharHUD2D();
-  fill(255,200,80); textSize(12); text('🏞️ MODO SANDBOX — '+SB_WEATHER_NAMES[sbWeather], 20, 60);
-  fill(200); textSize(9); text('C = mudar clima | ESC sair', 20, 80);
-}
-
-// ═════════════════════════════════════════════════════════════
-// PLANTAÇÃO
-// ═════════════════════════════════════════════════════════════
-function executarPlantacao() {
-  background(30,70,30);
-  fill(0,200); rect(0,0,width,40);
-  fill(120,255,100); textSize(16); text('🌱 PLANTAÇÃO — SIMULADOR AGRÍCOLA', width/2, 22);
-  let cellW=70, cellH=55, offX=40, offY=60;
-  for(let i=0;i<plantGrid.length;i++) {
-    let cell = plantGrid[i], x = offX+cell.col*cellW, y = offY+cell.row*cellH, sel = (cell.col===plantCursor.col && cell.row===plantCursor.row);
-    fill(100,70,40); rect(x,y,cellW-4,cellH-4,4);
-    if(cell.stage>0) { fill(60,140,60); ellipse(x+cellW/2-2,y+cellH-12,12,12); fill(80,180,70); rect(x+cellW/2-6,y+cellH-25,8,15); if(cell.stage>=3) { fill(200,180,50); ellipse(x+cellW/2-2,y+cellH-30,8,10); } }
-    else { fill(80,55,35); ellipse(x+cellW/2-2,y+cellH-10,10,6); }
-    if(cell.hasPest) { fill(255,80,40,200); ellipse(x+cellW-12,y+10,10,10); fill(255); text('!', x+cellW-12, y+12); }
-    fill(200,180,120); textSize(8); text('pH:'+cell.pH.toFixed(1), x+4, y+12);
-    if(sel) { stroke(120,255,80); strokeWeight(2); noFill(); rect(x,y,cellW-4,cellH-4,4); noStroke(); }
-    if(cell.stage>0 && cell.stage<5 && cell.water>30 && cell.pH>5.5 && cell.pH<7.5 && !cell.hasPest) { cell.growTimer=(cell.growTimer||0)+1; if(cell.growTimer>180) { cell.stage=min(5,cell.stage+1); cell.growTimer=0; if(cell.stage===5) plantResources.creditos=min(100,plantResources.creditos+5); } }
-    if(frameCount%90===0) cell.water=max(0,cell.water-random(1,3));
-    if(!cell.hasPest && cell.stage>1 && random()<0.002) cell.hasPest=true;
+  for (var i = 0; i < activeNPCs.length; i++) {
+    var npc = activeNPCs[i];
+    if (dist(player.x, player.y, npc.x, npc.y) < 2.4) {
+      dialogActive = true;
+      dialogNPC = npc;
+      dialogLine = 0;
+      npc.talking = true;
+      playDialog();
+      return;
+    }
   }
-  fill(0,180); rect(0,height-80,width,80);
-  fill(255,220,100); textSize(11); text('💧 ÁGUA: '+plantResources.agua+'   🌿 CRÉDITOS: '+plantResources.creditos+'   🌾 SEMENTES: '+plantResources.sementes, 10, height-60);
-  fill(200); textSize(10); text('🔧 '+PLANT_TOOLS[plantTool]+' | 1-5 trocar | ESPAÇO usar | ↑↓←→ mover | ESC sair', 10, height-35);
-  if(plantMsgTimer>0) { plantMsgTimer--; fill(0,200); rect(width/2-150,height-130,300,30,5); fill(255); textSize(12); text(plantMsg, width/2, height-115); }
+  for (var i = 0; i < spots.length; i++) {
+    var sp = spots[i];
+    if (!sp.done && dist(player.x, player.y, sp.x, sp.y) < 1.8) {
+      sp.done = true;
+      objDone++;
+      pickupAnim = 45;
+      playPickup();
+      if (objDone >= objTotal) {
+        phaseWin = true;
+        if (currentPhase < 5) phasesUnlocked[currentPhase + 1] = true;
+        saveProgress();
+      }
+      return;
+    }
+  }
 }
 
-// ═════════════════════════════════════════════════════════════
-// INPUTS
-// ═════════════════════════════════════════════════════════════
-function mousePressed() {
-  if(estadoTela===0) { mudarEstado(1); return; }
-  if(estadoTela===4 && !trailerAtivo && !campaignActive && !sandboxActive && !plantActive) {
-    let bW=210, bH=52, bGap=18, totalW=3*bW+2*bGap, bX0=(width-totalW)/2, bY=height/2+10;
-    for(let i=0;i<3;i++) {
-      let bx = bX0 + i*(bW+bGap);
-      if(mouseX>bx && mouseX<bx+bW && mouseY>bY && mouseY<bY+bH) {
-        if(i===0) { campaignActive=true; campaignState='levelSelect'; }
-        else if(i===1) { iniciarSandbox(); }
-        else { plantActive=true; iniciarPlantacao(); }
-        return;
+function renderizarCena2D() {
+  var map2 = MAPS[currentPhase];
+  cameraX2 = player.x * TAMANHO_CELULA - width/2 + TAMANHO_CELULA/2;
+  cameraY2 = player.y * TAMANHO_CELULA - height/2 + TAMANHO_CELULA/2;
+  cameraX2 = constrain(cameraX2, 0, MAPSIZE * TAMANHO_CELULA - width);
+  cameraY2 = constrain(cameraY2, 0, MAPSIZE * TAMANHO_CELULA - height);
+  push();
+  translate(-cameraX2, -cameraY2);
+  for (var y = 0; y < MAPSIZE; y++) {
+    for (var x = 0; x < MAPSIZE; x++) {
+      var tile = map2[y][x];
+      var xp = x * TAMANHO_CELULA;
+      var yp = y * TAMANHO_CELULA;
+      if (tile === 1) { // parede
+        fill(101, 67, 33); rect(xp, yp, TAMANHO_CELULA, TAMANHO_CELULA);
+        fill(139, 90, 43); rect(xp + 4, yp + 4, TAMANHO_CELULA - 8, TAMANHO_CELULA - 8);
+      } else if (tile === 2) { // árvore
+        fill(101, 67, 33); rect(xp + 10, yp + 14, 8, 14);
+        fill(34, 139, 34); ellipse(xp + 14, yp + 10, 18, 18);
+      } else if (tile === 3) { // celeiro
+        fill(160, 80, 40); rect(xp, yp, TAMANHO_CELULA, TAMANHO_CELULA);
+        fill(200, 120, 60); rect(xp + 4, yp + 4, TAMANHO_CELULA - 8, TAMANHO_CELULA - 8);
+      } else if (tile === 4) { // milho
+        fill(80, 140, 40); rect(xp + 12, yp + 14, 4, 14);
+        fill(60, 120, 35); ellipse(xp + 14, yp + 10, 10, 12);
+      } else if (tile === 5) { // pedra
+        fill(120, 110, 100); ellipse(xp + 14, yp + 18, 18, 12);
+      } else { // chão
+        var cor = 90 + (x * 3 + y * 2) % 40;
+        fill(cor, cor - 20, cor - 50); rect(xp, yp, TAMANHO_CELULA, TAMANHO_CELULA);
+        fill(70, 50, 30, 80); ellipse(xp + 14, yp + 20, 10, 6);
       }
     }
   }
-  if(campaignActive && campaignState==='levelSelect') {
-    let cols=3, bw=238, bh=105, gx=(width-cols*bw-(cols-1)*14)/2, gy=62;
-    for(let i=0;i<6;i++) {
-      let col=i%cols, row=floor(i/cols), bx=gx+col*(bw+14), by=gy+row*(bh+12);
-      if(mouseX>bx && mouseX<bx+bw && mouseY>by && mouseY<by+bh && phasesUnlocked[i]) { iniciarFase(i); return; }
+  for (var i = 0; i < spots.length; i++) {
+    if (!spots[i].done) {
+      var xp = spots[i].x * TAMANHO_CELULA;
+      var yp = spots[i].y * TAMANHO_CELULA;
+      var pulse = 150 + sin(frameCount * 0.1) * 105;
+      fill(255, 100, 100, pulse); ellipse(xp + 14, yp + 14, 24, 24);
+      fill(255, 50, 50); ellipse(xp + 14, yp + 14, 16, 16);
+      fill(255); textSize(16); text('⭐', xp + 14, yp + 14);
     }
   }
-  if(campaignActive && campaignState==='preCutscene') { avancarCutscene(); return; }
-  if(campaignActive && campaignState==='gameplay' && dialogActive) { dialogLine++; let d=DIALOGUES[currentPhase][dialogNPC.dialogSet]||[]; if(dialogLine>=d.length) { dialogActive=false; if(dialogNPC) dialogNPC.talking=false; dialogNPC=null; } }
+  for (var i = 0; i < activeNPCs.length; i++) {
+    var npc = activeNPCs[i];
+    var ch = CHARS[npc.charIdx];
+    var xp = npc.x * TAMANHO_CELULA;
+    var yp = npc.y * TAMANHO_CELULA;
+    fill(ch.shirtR, ch.shirtG, ch.shirtB); rect(xp + 5, yp + 10, 18, 18, 3);
+    fill(ch.skinR, ch.skinG, ch.skinB); ellipse(xp + 14, yp + 8, 14, 14);
+    if (ch.hat) { fill(ch.shirtR * 0.6, ch.shirtG * 0.6, ch.shirtB * 0.6); rect(xp + 7, yp + 2, 14, 5, 2); }
+    fill(0); ellipse(xp + 10, yp + 7, 2, 2); ellipse(xp + 18, yp + 7, 2, 2);
+    fill(255, 255, 200); textSize(7); text(ch.name, xp + 14, yp - 2);
+  }
+  var xp = player.x * TAMANHO_CELULA;
+  var yp = player.y * TAMANHO_CELULA;
+  fill(60, 120, 60); rect(xp + 5, yp + 10, 18, 18, 3);
+  fill(255, 200, 150); ellipse(xp + 14, yp + 8, 14, 14);
+  fill(101, 67, 33); rect(xp + 7, yp + 2, 14, 5, 2);
+  fill(0); ellipse(xp + 10, yp + 7, 2, 2); ellipse(xp + 18, yp + 7, 2, 2);
+  var ang = player.angle;
+  var dx = cos(ang) * 10, dy = sin(ang) * 10;
+  fill(255, 200, 100);
+  triangle(xp + 14 + dx, yp + 14 + dy,
+           xp + 14 + dx * 0.3 + 4, yp + 14 + dy * 0.3,
+           xp + 14 + dx * 0.3 - 4, yp + 14 + dy * 0.3);
+  pop();
 }
 
-function keyPressed() {
-  keys[key]=true;
-  if(estadoTela===3) { mudarEstado(4); return; }
-  if(estadoTela===4 && !trailerAtivo && !campaignActive && !sandboxActive && !plantActive && (key==='r'||key==='R')) { trailerAtivo=true; trailerFrame=0; return; }
-  if(sandboxActive && keyCode===ESCAPE) { sandboxActive=false; if(document.exitPointerLock) document.exitPointerLock(); return; }
-  if(sandboxActive && (key==='c'||key==='C')) { sbWeather=(sbWeather+1)%4; return; }
-  if(plantActive && keyCode===ESCAPE) { plantActive=false; return; }
-  if(plantActive && key>='1' && key<='5') { plantTool=parseInt(key)-1; return; }
-  if(plantActive && keyCode===32) {
-    let idx = plantCursor.row*PLANT_COLS+plantCursor.col;
-    if(idx>=0 && idx<plantGrid.length) {
-      let cell = plantGrid[idx];
-      if(plantTool===0) plantMsg='pH:'+cell.pH.toFixed(1)+' Água:'+floor(cell.water)+'% Estágio:'+cell.stage;
-      else if(plantTool===1 && cell.stage===0) { cell.stage=1; plantMsg='Solo arado!'; }
-      else if(plantTool===2 && cell.stage===1 && plantResources.sementes>=3) { cell.stage=2; plantResources.sementes-=3; plantMsg='Semeado!'; }
-      else if(plantTool===3 && plantResources.agua>=8) { cell.water=min(100,cell.water+20); plantResources.agua-=8; plantMsg='Irrigado!'; }
-      else if(plantTool===4 && cell.hasPest && plantResources.creditos>=10) { cell.hasPest=false; plantResources.creditos-=10; plantMsg='Praga eliminada!'; }
-      else plantMsg='Ação inválida!';
-      plantMsgTimer=90;
+function desenharMiniMapa() {
+  var map2 = MAPS[currentPhase];
+  var miniSize = 90;
+  var cellSize = miniSize / 9;
+  var offsetX = width - miniSize - 10;
+  var offsetY = 55;
+  fill(0, 180); rect(offsetX - 2, offsetY - 2, miniSize + 4, miniSize + 4, 5);
+  var startX = max(0, min(MAPSIZE - 9, floor(player.x) - 4));
+  var startY = max(0, min(MAPSIZE - 9, floor(player.y) - 4));
+  for (var i = 0; i < 9; i++) {
+    for (var j = 0; j < 9; j++) {
+      var mapX = startX + j, mapY = startY + i;
+      if (mapX < MAPSIZE && mapY < MAPSIZE) {
+        var tile = map2[mapY][mapX];
+        var cor = (tile === 1) ? color(80, 70, 50) : color(100, 80, 50);
+        fill(cor);
+        rect(offsetX + j * cellSize, offsetY + i * cellSize, cellSize, cellSize);
+      }
     }
   }
-  if(plantActive && keyCode===LEFT_ARROW) plantCursor.col=max(0,plantCursor.col-1);
-  if(plantActive && keyCode===RIGHT_ARROW) plantCursor.col=min(PLANT_COLS-1,plantCursor.col+1);
-  if(plantActive && keyCode===UP_ARROW) plantCursor.row=max(0,plantCursor.row-1);
-  if(plantActive && keyCode===DOWN_ARROW) plantCursor.row=min(PLANT_ROWS-1,plantCursor.row+1);
-  
-  if(!campaignActive) return;
-  if(campaignState==='levelSelect' && keyCode===ESCAPE) { campaignActive=false; return; }
-  if(campaignState==='preCutscene' && keyCode===32) { avancarCutscene(); return; }
-  if(campaignState==='gameplay' && keyCode===ESCAPE) { campaignState='pause'; pauseOpt=0; if(document.exitPointerLock) document.exitPointerLock(); return; }
-  if(campaignState==='gameplay' && (key==='e'||key==='E') && dialogActive) { dialogLine++; let d=DIALOGUES[currentPhase][dialogNPC.dialogSet]||[]; if(dialogLine>=d.length) { dialogActive=false; if(dialogNPC) dialogNPC.talking=false; dialogNPC=null; } return; }
-  if(campaignState==='pause') {
-    if(keyCode===ESCAPE) campaignState='gameplay';
-    if(keyCode===UP_ARROW) pauseOpt=(pauseOpt+3)%4;
-    if(keyCode===DOWN_ARROW) pauseOpt=(pauseOpt+1)%4;
-    if(keyCode===ENTER) {
-      if(pauseOpt===0) campaignState='gameplay';
-      else if(pauseOpt===1) iniciarFase(currentPhase);
-      else if(pauseOpt===2) campaignState='levelSelect';
-      else if(pauseOpt===3) { campaignActive=false; if(document.exitPointerLock) document.exitPointerLock(); }
-    }
-  }
-  if(campaignState==='win' && keyCode===32) { if(currentPhase<5) iniciarFase(currentPhase+1); else { csIdx=0; csFrame=0; campaignState='ending'; } }
-  if(campaignState==='win' && keyCode===ESCAPE) campaignState='levelSelect';
+  var px = offsetX + ((player.x - startX) * cellSize);
+  var py = offsetY + ((player.y - startY) * cellSize);
+  fill(255, 255, 100); ellipse(px, py, cellSize * 0.8, cellSize * 0.8);
 }
 
-function keyReleased() { keys[key]=false; }
+function desenharBracos2D() {
+  var pd = PHASE_DATA[currentPhase];
+  fill(0, 180); rect(width - 150, height - 50, 140, 40, 8);
+  fill(255, 200, 80); textSize(11); text(pd.tool, width - 140, height - 30);
+  fill(200); textSize(9); text('[E] Interagir', width - 140, height - 18);
+  if (!pointerLocked && campaignState === 'gameplay') {
+    fill(0, 140); rect(width / 2 - 105, height - 45, 210, 20, 4);
+    fill(255, 200, 80); textSize(9); text('CLIQUE para travar a câmera', width / 2, height - 35);
+  }
+}
+
+function desenharHUD2D() {
+  var pd = PHASE_DATA[currentPhase];
+  fill(0, 195); rect(0, 0, width, 48);
+  fill(175, 248, 140); textSize(12); text(pd.name + ' — ' + pd.subtitle, 14, 20);
+  fill(135, 200, 105); textSize(9); text(pd.toolTip + ' | WASD mover | E interagir', 14, 35);
+  var prog = objDone / max(objTotal, 1);
+  fill(0, 100); rect(width / 2 - 85, 10, 170, 28, 4);
+  fill(28, 100, 22); rect(width / 2 - 83, 12, 166 * prog, 24, 3);
+  fill(195, 255, 165); textSize(11); text(pd.objLabel + ': ' + objDone + ' / ' + objTotal, width / 2, 28);
+  if (phaseTimer > 0) {
+    var secs = ceil(phaseTimer / 60);
+    fill(255, 220, 80); textSize(14); text('⏱ ' + floor(secs / 60) + ':' + nf(secs % 60, 2), width - 14, 24);
+  }
+  var cx = width / 2, cy = height / 2;
+  stroke(255, 255, 255, 200); strokeWeight(1.5);
+  line(cx - 10, cy, cx - 4, cy); line(cx + 4, cy, cx + 10, cy);
+  line(cx, cy - 10, cx, cy - 4); line(cx, cy + 4, cx, cy + 10);
+  noStroke();
+  fill(0, 120); rect(width - 124, 52, 110, 13, 3);
+  fill(player.running ? color(255, 175, 0) : color(65, 195, 65)); rect(width - 122, 54, player.stamina, 9, 2);
+  fill(195, 200, 175); textSize(9); text('STAMINA', width - 14, 58);
+  fill(0, 160); rect(0, height - 26, width, 26);
+  fill(145, 195, 115); textSize(8); text('WASD/Setas mover | E interagir | ESC pausar', 14, height - 13);
+}
