@@ -1,2579 +1,2496 @@
-/* ============================================================
-   AGRO FORTE — Modo Plantação (Primeira Pessoa)
-   FPS completo via Engine: construção, governo, cidade, encomendas
-   ============================================================ */
+// ═════════════════════════════════════════════════════════════
+// AGRINHO 2026 — Agro forte, futuro sustentável
+// Engine 3D + Campanha + Sandbox + Plantação
+// ═════════════════════════════════════════════════════════════
 
-var Plantation = (function() {
+// ── VARIÁVEIS DE ESTADO GLOBAL ─────────────────────────────
+let estadoTela = 0; // 0=clique, 1=aviso, 2=estudio, 3=menu, 4=jogo
+let tempoEstado = 0;
+let anguloCubo = 0;
+let menuHover = -1;
 
-  var canvas;
-  var W, H;
-  var running = false;
-  var animFrame = null;
+// ── CAMPANHA ───────────────────────────────────────────────
+let campaignActive = false;
+let campaignState = 'levelSelect'; // levelSelect|preCutscene|gameplay|pause|win|ending
+let currentPhase = 0;
+let phasesUnlocked = [true, false, false, false, false, false];
+let csFrame = 0, csIdx = 0;
+let pauseOpt = 0;
 
-  // ---- Estado persistente ----
-  var money = 1200, day = 1;
-  var totalPlanted = 0, totalHarvested = 0;
+// ── TRAILER ────────────────────────────────────────────────
+let trailerAtivo = false;
+let trailerFrame = 0;
+let cam1 = 0, cam2 = 0, cam2b = 0;
 
-  var FARM_COLS = 14, FARM_ROWS = 14;
-  var farmGrid = [];
+// ── SANDBOX ────────────────────────────────────────────────
+let sandboxActive = false;
+let sbWeather = 0; // 0=dia 1=nublado 2=noite 3=tempestade
+let sbTool = 0;
+let sbWeatherTimer = 0;
+let lightningFlash = 0;
+let stormParts = [];
+const SB_WEATHER_NAMES = ['☀ DIA CLARO', '⛅ NUBLADO', '🌙 NOITE TÁTICA', '⛈ TEMPESTADE'];
 
-  var hasPermit = false;
-  var docsCollected = 0;
-  var buildings = [];
-  var inventory = {};
-  var orders = [], activeOrder = null;
+// ── PLANTAÇÃO ──────────────────────────────────────────────
+let plantActive = false;
+let plantGrid = []; // 10 cols x 6 rows
+const PLANT_COLS = 10, PLANT_ROWS = 6;
+let plantResources = { agua: 100, creditos: 100, solo: 100, sementes: 30 };
+let plantTool = 0; // 0=scanner 1=arado 2=semear 3=irrigar 4=bioinsumo
+const PLANT_TOOLS = ['SCANNER', 'ARAR', 'SEMEAR', 'IRRIGAR', 'BIOINSUMO'];
+let plantMsg = '', plantMsgTimer = 0;
+let plantEfficiency = 0;
+let plantCursor = { col: 0, row: 0 };
+let plantWin = false;
 
-  var currentTool = 'hoe';
-  var showUI = 'none'; // 'none'|'build'|'orders'|'shop'|'city'|'gov'|'bus'|'interact'
+// ── PLAYER ─────────────────────────────────────────────────
+let player = { x: 3.5, y: 3.5, angle: 0, pitch: 0, stamina: 100, health: 100, running: false, crouching: false, moving: false, bobTime: 0 };
+let pointerLocked = false;
+let nativeMovX = 0, nativeMovY = 0;
+let keys = {};
+let zBuf = new Float32Array(800);
+let cameraX2 = 0, cameraY2 = 0;
+const TAMANHO_CELULA = 28;
+let windParts = [];
+let stepTimer = 0;
 
-  var nearInfo = null;
-  var toast = null, toastTimer = 0;
+// ── OBJETIVOS ──────────────────────────────────────────────
+let objTotal = 0, objDone = 0;
+let phaseTimer = -1, phaseTimerMax = -1, phaseWin = false;
 
-  var farmMapInfo = null; // returned by Engine.generatePlantationMap
+// ── INTERAÇÃO ──────────────────────────────────────────────
+let dialogActive = false, dialogNPC = null, dialogLine = 0, interactCool = 0;
+let pickupAnim = 0;
 
-  var onMoneyFn = function(){}, onDayFn = function(){};
+// ── NPCs ───────────────────────────────────────────────────
+let activeNPCs = [], spots = [];
 
-  // ---- Seeds ----
-  var SEEDS = {
-    wheat:  {name:'Trigo',   icon:'🌾',days:3, sell:30, cost:20, cropId:3},
-    corn:   {name:'Milho',   icon:'🌽',days:5, sell:60, cost:40, cropId:1},
-    soy:    {name:'Soja',    icon:'🫘',days:4, sell:45, cost:30, cropId:2},
-    coffee: {name:'Café',    icon:'☕',days:7, sell:100,cost:80, cropId:4},
-    cotton: {name:'Algodão', icon:'🌼',days:6, sell:80, cost:60, cropId:5}
+// ── CANVAS ─────────────────────────────────────────────────
+let cnvElt = null;
+
+// ── ÁUDIO ──────────────────────────────────────────────────
+let audioReady = false;
+let windNoise = null;
+let windAmp = 0;
+let stepEnv = null, stepOsc = null;
+let pickupEnv = null, pickupOsc = null;
+let dialogEnv = null, dialogOsc = null;
+
+// ── MÚSICA TRAILER ─────────────────────────────────────────
+let musicInited = false;
+let musicAtiva = false;
+let musicFrame = 0;
+let acordeAtual = 0;
+let melodiaIdx = 0;
+let proxNota = 0, proxAcorde = 0, proxKick = 0;
+let padOscs = [];
+let bassOsc = null;
+let melodyEnv = null, melodyOsc = null;
+let hihatEnv = null, hihatOsc = null;
+let kickEnv = null, kickOsc = null;
+
+const ACORDES = [
+  [261.63, 329.63, 392.00],
+  [293.66, 369.99, 440.00],
+  [349.23, 440.00, 523.25],
+  [329.63, 415.30, 493.88],
+  [261.63, 329.63, 392.00],
+  [293.66, 369.99, 440.00],
+  [349.23, 440.00, 523.25],
+  [392.00, 493.88, 587.33]
+];
+const BAIXO_FREQS = [130.81, 146.83, 174.61, 164.81, 130.81, 146.83, 174.61, 196.00];
+const ACORDE_DUR = 480;
+const MELODIA_FREQS = [329.63, 349.23, 392.00, 440.00, 523.25, 493.88, 440.00, 392.00, 349.23, 329.63, 0, 329.63, 392.00, 440.00, 523.25, 587.33, 523.25, 440.00, 392.00, 349.23, 329.63, 0];
+const MELODIA_DUR = 60;
+
+// Partículas de cena
+let nuvens = [], passaros = [], graos = [], bovinos = [], poeira = [], brasas = [], menuStars = [];
+
+// Oscilador de fundo
+let osciladorFundo = null;
+let envelopeImpacto = null;
+let osciladorImpacto = null;
+
+// Menu options
+const OPCOES_MENU = ['CAMPANHA', 'SANDBOX', 'PLANTAÇÃO'];
+
+// Problemas para cena do trailer
+const PROBLEMAS = [
+  { sub: 'EROSÃO', titulo: 'SOLO EXAUSTO', l1: '40 anos de monocultura intensiva', l2: 'A terra perde 33% de nutrientes por safra', r: 180, g: 120, b: 40 },
+  { sub: 'CONTAMINAÇÃO', titulo: 'RIOS EM RISCO', l1: 'Agrotóxicos atingem lençóis freáticos', l2: '9 em cada 10 rios têm resíduos detectáveis', r: 60, g: 100, b: 200 },
+  { sub: 'DESMATAMENTO', titulo: 'FLORESTA PERDIDA', l1: 'Expansão agrícola sem planejamento', l2: 'Biodiversidade em colapso acelerado', r: 200, g: 60, b: 40 }
+];
+
+// ═════════════════════════════════════════════════════════════
+// PERSONAGENS — 10 chars com esquemas de cores detalhados
+// ═════════════════════════════════════════════════════════════
+const CHARS = [
+  { name: 'SEU JUCA', skinR: 200, skinG: 148, skinB: 96, hairR: 55, hairG: 38, hairB: 18,
+    shirtR: 180, shirtG: 50, shirtB: 50, pantR: 100, pantG: 70, pantB: 40, hat: true, coat: false,
+    beltR: 80, beltG: 55, beltB: 30, bootR: 55, bootG: 38, bootB: 20 },
+  { name: 'MARINA', skinR: 215, skinG: 168, skinB: 128, hairR: 38, hairG: 24, hairB: 10,
+    shirtR: 55, shirtG: 165, shirtB: 80, pantR: 48, pantG: 80, pantB: 145, hat: false, coat: false,
+    beltR: 30, beltG: 50, beltB: 90, bootR: 35, bootG: 55, bootB: 105 },
+  { name: 'PEDRO', skinR: 198, skinG: 158, skinB: 118, hairR: 78, hairG: 52, hairB: 28,
+    shirtR: 205, shirtG: 205, shirtB: 225, pantR: 58, pantG: 78, pantB: 162, hat: false, coat: false,
+    beltR: 38, beltG: 48, beltB: 100, bootR: 40, bootG: 50, bootB: 110 },
+  { name: 'D. CONCEIÇÃO', skinR: 188, skinG: 142, skinB: 102, hairR: 185, hairG: 185, hairB: 188,
+    shirtR: 225, shirtG: 182, shirtB: 52, pantR: 58, pantG: 38, pantB: 82, hat: false, coat: false,
+    beltR: 38, beltG: 22, beltB: 55, bootR: 42, bootG: 28, bootB: 60 },
+  { name: 'TONHO', skinR: 192, skinG: 148, skinB: 104, hairR: 48, hairG: 32, hairB: 14,
+    shirtR: 82, shirtG: 82, shirtB: 92, pantR: 58, pantG: 58, pantB: 70, hat: true, coat: false,
+    beltR: 40, beltG: 40, beltB: 50, bootR: 38, bootG: 38, bootB: 48 },
+  { name: 'BIU', skinR: 172, skinG: 132, skinB: 92, hairR: 18, hairG: 12, hairB: 8,
+    shirtR: 48, shirtG: 122, shirtB: 48, pantR: 38, pantG: 88, pantB: 38, hat: true, coat: false,
+    beltR: 25, beltG: 58, beltB: 25, bootR: 28, bootG: 62, bootB: 28 },
+  { name: 'LENA', skinR: 222, skinG: 178, skinB: 138, hairR: 205, hairG: 162, hairB: 58,
+    shirtR: 245, shirtG: 242, shirtB: 205, pantR: 205, pantG: 202, pantB: 165, hat: false, coat: false,
+    beltR: 130, beltG: 128, beltB: 100, bootR: 140, bootG: 138, bootB: 108 },
+  { name: 'DR. COSTA', skinR: 202, skinG: 162, skinB: 122, hairR: 58, hairG: 42, hairB: 28,
+    shirtR: 245, shirtG: 245, shirtB: 250, pantR: 78, pantG: 78, pantB: 100, hat: false, coat: true,
+    beltR: 50, beltG: 50, beltB: 68, bootR: 35, bootG: 35, bootB: 50 },
+  { name: 'ANA', skinR: 218, skinG: 172, skinB: 132, hairR: 28, hairG: 18, hairB: 8,
+    shirtR: 162, shirtG: 82, shirtB: 182, pantR: 58, pantG: 58, pantB: 82, hat: false, coat: false,
+    beltR: 38, beltG: 38, beltB: 55, bootR: 42, bootG: 42, bootB: 58 },
+  { name: 'PROF. CLARA', skinR: 228, skinG: 182, skinB: 142, hairR: 118, hairG: 78, hairB: 38,
+    shirtR: 78, shirtG: 122, shirtB: 205, pantR: 58, pantG: 48, pantB: 82, hat: false, coat: false,
+    beltR: 38, beltG: 30, beltB: 55, bootR: 42, bootG: 35, bootB: 60 }
+];
+
+// NPCs por fase
+const NPC_DATA = [
+  [{ c: 0, x: 7.5, y: 7.5, d: 0 }, { c: 1, x: 10.5, y: 5.5, d: 1 }, { c: 2, x: 14.5, y: 9.5, d: 2 }, { c: 3, x: 5.5, y: 13.5, d: 3 }, { c: 4, x: 16.5, y: 13.5, d: 4 }],
+  [{ c: 1, x: 6.5, y: 10.5, d: 0 }, { c: 5, x: 12.5, y: 6.5, d: 1 }, { c: 8, x: 9.5, y: 14.5, d: 2 }],
+  [{ c: 0, x: 10.5, y: 3.5, d: 0 }, { c: 1, x: 15.5, y: 7.5, d: 1 }, { c: 5, x: 6.5, y: 14.5, d: 2 }, { c: 9, x: 12.5, y: 12.5, d: 3 }],
+  [{ c: 1, x: 5.5, y: 8.5, d: 0 }, { c: 7, x: 10.5, y: 4.5, d: 1 }, { c: 8, x: 15.5, y: 10.5, d: 2 }],
+  [{ c: 0, x: 6.5, y: 6.5, d: 0 }, { c: 1, x: 12.5, y: 12.5, d: 1 }, { c: 2, x: 15.5, y: 6.5, d: 2 }, { c: 7, x: 4.5, y: 14.5, d: 3 }, { c: 4, x: 9.5, y: 4.5, d: 4 }],
+  [{ c: 0, x: 8.5, y: 8.5, d: 0 }, { c: 1, x: 14.5, y: 5.5, d: 1 }, { c: 6, x: 6.5, y: 14.5, d: 2 }, { c: 9, x: 15.5, y: 14.5, d: 3 }, { c: 3, x: 4.5, y: 4.5, d: 4 }]
+];
+
+const DIALOGUES = [
+  [['Essa terra tá pedindo socorro, Tico...', 'Quarenta anos lavrando aqui.', 'Você vê o que eu sinto no olho?'],
+   ['O scanner mapeia acidez e umidade.', 'Cada ponto crítico aparece no display.', 'Encontre os 5 pontos vermelhos!'],
+   ['Papai tá certo de desconfiar...', 'Mas os dados não mentem, sabe?', 'A safra não espera!'],
+   ['Minha mãe cuidou desta terra por décadas.', 'Agora é a nossa vez de protegê-la.', 'Que bom que vieram ajudar!'],
+   ['Trator na oficina de novo...', 'Se fosse digital não quebraria tanto!', 'Mas vamos continuar no braço!']],
+  [['Modo noturno ativo! Cuidado com o milho.', 'O infravermelho detecta o calor das pragas.', 'Procura manchas alaranjadas no scanner.'],
+   ['Guarda rural aqui. Tudo quieto por enquanto.', 'Mas à noite as pragas ficam espertas.', 'Anda devagar pra não espantar.'],
+   ['Vim registrar a infestação pro jornal.', 'Isso é manchete nacional, sabia?', 'Documente cada praga!']],
+  [['O timer tá rodando! Corre Tico!', 'Cada bomba desativada salva o rio.', '4 minutos pra zerar tudo!'],
+   ['Analisei as amostras: contaminação grave!', 'O agrotóxico é ilegal no Brasil.', 'Desative as bombas — vai rápido!'],
+   ['Filmando tudo aqui. Vai pro ar amanhã.', 'As bombas ficam nos galpões laranja.', 'Vai rápido antes que percebam!'],
+   ['Professor me mandou ver o campo.', 'Isso é o que estudamos na teoria...', 'Que horror na prática!']],
+  [['Trinta anos de trabalho no lixo...', 'Mas a terra se recupera. Eu sei que sim.', 'Coleta as amostras mais escuras primeiro.'],
+   ['Com estas amostras analisamos os danos.', 'Precisamos de dados para a recuperação.', 'Evita as poças de resíduo!'],
+   ['Pedro me ligou ontem chorando.', 'A família inteira preocupada.', 'Seja forte, vamos reconstruir isso.']],
+  [['Cada muda é uma promessa de vida.', 'A natureza tem memória, ela volta.', 'Planta nos pontos azuis, Tico!'],
+   ['Raízes profundas filtram o solo.', 'Escolhemos espécies nativas aqui.', 'Beleza ver o verde voltando.'],
+   ['Minha mãe dizia: planta uma árvore.', 'Você nunca sabe quem vai descansar.', 'Que emocionante esse momento!'],
+   ['Documentando a recuperação.', 'Isso vai virar estudo de caso.', 'Mais uma muda plantada!'],
+   ['Avó Conceição tá emocionada.', 'Nunca vi ela assim antes.', 'Esse projeto é muito bonito.']],
+  [['A lavoura tá renascendo, Tico!', 'Nunca duvidei da terra do Paraná.', 'Inspeciona cada setor com o drone.'],
+   ['Certificação sustentável requer isso.', 'Cada área confirmada = ponto.', 'Você vai conseguir!'],
+   ['As abelhas voltaram! Sinal bom!', 'Colmeia nova instalada ontem.', 'A biodiversidade tá voltando!'],
+   ['Trouxe os alunos pra ver o campo.', 'Educação ambiental na prática!', 'Que exemplo incrível!'],
+   ['Meu marido vai ficar orgulhoso.', 'Essa terra vai voltar pro bisneto.', 'Continue, tô torcendo!']]
+];
+
+// ═════════════════════════════════════════════════════════════
+// MAPAS 24×24
+// 0=chão 1=parede 2=árvore 3=celeiro 4=milho 5=pedra 6=água 7=palha
+// ═════════════════════════════════════════════════════════════
+const SPAWNS = [[3.5, 3.5, 0], [2.5, 3.5, 0], [2.5, 16.5, 0], [2.5, 2.5, 0], [3.5, 3.5, 0], [3.5, 3.5, 0]];
+const MAPS = [
+  [[1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 4, 4, 4, 4, 0, 0, 2, 0, 0, 0, 0, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 1], [1, 0, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 1], [1, 0, 4, 4, 4, 4, 0, 0, 0, 0, 7, 0, 0, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 4, 4, 4, 0, 0, 0, 1], [1, 0, 4, 4, 0, 0, 1, 3, 3, 1, 0, 0, 0, 2, 0, 0, 4, 4, 4, 4, 0, 0, 0, 1], [1, 0, 4, 4, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 4, 4, 4, 4, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 4, 4, 4, 0, 0, 0, 1], [1, 0, 4, 4, 4, 0, 0, 0, 7, 0, 0, 0, 0, 0, 0, 0, 4, 4, 4, 4, 0, 0, 0, 1], [1, 0, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 4, 4, 4, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 4, 0, 0, 0, 0, 0, 1], [1, 0, 4, 4, 0, 0, 0, 7, 4, 4, 4, 0, 0, 0, 0, 0, 4, 4, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]],
+  [[1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 4, 4, 4, 4, 0, 0, 2, 0, 0, 0, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 4, 4, 4, 4, 4, 4, 0, 0, 0, 0, 0, 1], [1, 0, 4, 4, 4, 4, 0, 0, 2, 0, 0, 0, 4, 4, 4, 4, 4, 4, 0, 0, 0, 0, 0, 1], [1, 0, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 4, 4, 4, 4, 4, 4, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 4, 4, 4, 4, 0, 0, 2, 0, 0, 0, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 4, 0, 0, 0, 0, 0, 1], [1, 0, 4, 4, 0, 0, 0, 0, 4, 4, 4, 0, 0, 0, 0, 0, 4, 4, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]],
+  [[1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 1], [1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]],
+  [[1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]],
+  [[1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 2, 0, 0, 0, 0, 2, 0, 0, 0, 0, 2, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 2, 0, 0, 0, 0, 2, 0, 0, 0, 0, 2, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]],
+  [[1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 4, 4, 4, 4, 0, 2, 0, 0, 0, 2, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 4, 4, 4, 0, 0, 2, 0, 0, 2, 0, 0, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 4, 4, 4, 4, 0, 0, 2, 0, 0, 0, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 4, 4, 0, 0, 0, 0, 4, 4, 4, 4, 0, 0, 0, 0, 4, 4, 0, 0, 0, 0, 0, 1], [1, 0, 4, 4, 0, 2, 0, 0, 4, 4, 4, 4, 0, 0, 2, 0, 4, 4, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]]
+];
+const MAPSIZE = 24;
+
+const PHASE_DATA = [
+{ name: 'FASE 1', subtitle: 'Escaneamento do Solo', tool: 'SCANNER', toolTip: '[E] Escanear ponto crítico', objLabel: 'Pontos escaneados', objTotal: 5, hasTimer: false, icone: '🔍',
+  skyTop: [110, 185, 248], skyBot: [65, 138, 210], floorTop: [115, 82, 38], floorBot: [72, 50, 20], wallR: 148, wallG: 108, wallB: 58, fogR: 145, fogG: 165, fogB: 190, fogDist: 14, night: false, fogDensity: 0.06 },
+  { name: 'FASE 2', subtitle: 'Mapeamento Noturno de Pragas', tool: 'SCANNER NOTURNO', toolTip: '[E] Escanear praga', objLabel: 'Pragas mapeadas', objTotal: 6, hasTimer: false,
+    skyTop: [8, 12, 28], skyBot: [4, 8, 20], floorTop: [18, 28, 12], floorBot: [8, 14, 5], wallR: 38, wallG: 48, wallB: 30, fogR: 12, fogG: 22, fogB: 14, fogDist: 5.5, night: true, fogDensity: 0.16 },
+  { name: 'FASE 3', subtitle: 'Interrupção do Agrotóxico', tool: 'HACKEAR', toolTip: '[E] Hackear bomba ilegal', objLabel: 'Bombas desativadas', objTotal: 5, hasTimer: true, timerSec: 240,
+    skyTop: [205, 100, 22], skyBot: [160, 68, 14], floorTop: [118, 72, 22], floorBot: [80, 48, 10], wallR: 172, wallG: 98, wallB: 32, fogR: 190, fogG: 115, fogB: 48, fogDist: 9, night: false, fogDensity: 0.10 },
+  { name: 'FASE 4', subtitle: 'Coleta de Amostras Contaminadas', tool: 'COLETOR', toolTip: '[E] Coletar amostra de solo', objLabel: 'Amostras coletadas', objTotal: 6, hasTimer: false,
+    skyTop: [72, 70, 82], skyBot: [45, 44, 55], floorTop: [62, 52, 45], floorBot: [38, 30, 25], wallR: 88, wallG: 82, wallB: 78, fogR: 80, fogG: 78, fogB: 85, fogDist: 9, night: false, fogDensity: 0.10 },
+  { name: 'FASE 5', subtitle: 'Plantio de Remediação', tool: 'PLANTADEIRA', toolTip: '[E] Plantar muda nativa', objLabel: 'Mudas plantadas', objTotal: 7, hasTimer: false,
+    skyTop: [60, 185, 205], skyBot: [32, 140, 165], floorTop: [42, 108, 52], floorBot: [25, 68, 30], wallR: 42, wallG: 108, wallB: 68, fogR: 120, fogG: 178, fogB: 195, fogDist: 12, night: false, fogDensity: 0.07 },
+  { name: 'FASE 6', subtitle: 'Voo Final de Inspeção', tool: 'DRONE', toolTip: '[E] Inspecionar área', objLabel: 'Áreas inspecionadas', objTotal: 6, hasTimer: false,
+    skyTop: [82, 205, 252], skyBot: [42, 165, 222], floorTop: [55, 148, 55], floorBot: [32, 100, 32], wallR: 68, wallG: 152, wallB: 68, fogR: 150, fogG: 210, fogB: 240, fogDist: 16, night: false, fogDensity: 0.05 }
+];
+
+const CUTSCENE_DATA = [
+  [['narrador', 'Paraná, interior. O sol nasce sobre 40 anos de trabalho e esperança.', 260],
+   ['juca', 'Essa terra tem memória, Tico. Cada sulco conta uma história.', 290],
+   ['marina', 'Pai, o scanner detecta acidez, umidade e temperatura em tempo real.', 280],
+   ['juca', 'Tecnologia em cima da minha terra... me parece invasão, Marina.', 270],
+   ['pedro', 'Tio Juca, os vizinhos já usam isso. É o futuro do campo.', 280],
+   ['conceicao', 'Meu filho, o progresso bem usado não destrói — ele protege.', 270],
+   ['tico', '[TICO] Scanner ativo! Encontre os pontos críticos no campo.', 220]],
+  [['narrador', 'Com a lavoura mapeada de dia, as pragas atacam na calada da noite.', 260],
+   ['marina', 'Os dados do dia apontam infestação severa no setor norte.', 280],
+   ['biu', 'Guarda rural aqui. Já interceptei três lotes suspeitos essa semana.', 270],
+   ['tico', '[TICO] Modo visão noturna e infravermelho ativados.', 240],
+   ['ana', 'Vim registrar pra reportagem. Isso é crise nacional, gente.', 270],
+   ['tico', '[TICO] Cada praga mapeada protege o restante da safra!', 220]],
+  [['narrador', 'O vizinho age na ilegalidade. Agrotóxicos ameaçam o aquífero.', 270],
+   ['marina', 'Preciso hackear os sistemas de irrigação! O rio está em risco!', 300],
+   ['costa', 'Analisei as amostras: contaminação gravíssima. Aja rápido!', 280],
+   ['juca', 'Se o rio for afetado, toda a região perde o sustento.', 280],
+   ['tico', '[TICO] ALERTA! 5 bombas detectadas. TIMER: 4 MINUTOS!', 250]],
+  [['narrador', 'O pior aconteceu. Agrotóxico ilegal devastou parte do campo.', 270],
+   ['juca', 'Quarenta anos... Olha o que fizeram com minha terra.', 300],
+   ['pedro', 'Pai vai se recuperar, mas a terra precisa de ajuda urgente.', 280],
+   ['marina', 'Com as amostras certas, desenvolvemos o protocolo de cura.', 285],
+   ['costa', 'Cada amostra revela o perfil de contaminação. Seja preciso.', 270],
+   ['tico', '[TICO] Protocolo de análise de solo iniciado!', 230]],
+  [['narrador', 'Os resultados chegaram. A recuperação é possível!', 260],
+   ['marina', 'As análises mostram que espécies nativas restauram o solo!', 290],
+   ['lena', 'Minhas abelhas voltaram! As flores nativas as atraem.', 280],
+   ['juca', 'Então vamos plantar. Cada muda é uma aposta no futuro.', 275],
+   ['conceicao', 'Minha mãe plantava nativas. Ela sabia o que estava fazendo.', 280],
+   ['tico', '[TICO] Mudas de remediação prontas. Plante nos pontos azuis!', 230]],
+  [['narrador', 'Meses depois. A lavoura pulsa de vida novamente.', 250],
+   ['juca', 'A tecnologia salvou minha terra. Nunca pensei que diria isso.', 300],
+   ['pedro', 'A nova geração de agricultores vai precisar saber tudo isso.', 280],
+   ['marina', 'Ainda falta a inspeção final de drone pra certificação.', 275],
+   ['costa', 'Dados confirmam: solo dentro dos parâmetros sustentáveis!', 270],
+   ['lena', 'A colmeia triplicou! A biodiversidade está de volta!', 275],
+   ['tico', '[TICO] Drone pronto! Inspecione todas as áreas para a vitória!', 240]]
+];
+
+const ENDING_SCENES = [
+  ['narrador', 'A lavoura foi recuperada. O rio voltou a correr limpo.', 285],
+  ['juca', 'Marina, você tinha razão desde o princípio. Me perdoe a teimosia.', 295],
+  ['pedro', 'Esse campo vai continuar por gerações graças a vocês.', 285],
+  ['marina', 'É o único caminho: agro forte E futuro sustentável juntos.', 285],
+  ['conceicao', 'Esta terra sempre soube se curar. Só precisava de ajuda.', 280],
+  ['lena', 'As abelhas cantam de novo. Isso diz tudo.', 270],
+  ['tico', '[TICO] Missão concluída! Agrinho 2026 — Agro forte, futuro sustentável!', 265],
+  ['narrador', 'Obrigado por jogar e por acreditar num campo mais justo e verde.', 300]
+];
+
+// ═════════════════════════════════════════════════════════════
+// SETUP
+// ═════════════════════════════════════════════════════════════
+
+function setup() {
+  let cnv = createCanvas(800, 500);
+  cnvElt = cnv.elt;
+  frameRate(60);
+  noiseDetail(4, 0.5);
+
+  cnvElt.addEventListener('mousedown', function () {
+    if (campaignActive && campaignState === 'gameplay') {
+      if (cnvElt.requestPointerLock) cnvElt.requestPointerLock();
+    }
+  });
+  document.addEventListener('pointerlockchange', function () {
+    pointerLocked = (document.pointerLockElement === cnvElt);
+    if (!pointerLocked) { nativeMovX = 0; nativeMovY = 0; }
+  });
+  document.addEventListener('mousemove', function (e) {
+    if (pointerLocked) { nativeMovX += (e.movementX || 0); nativeMovY += (e.movementY || 0); }
+  });
+
+  buildTextures();
+
+  osciladorFundo = new p5.Oscillator('sine');
+  osciladorFundo.freq(60); osciladorFundo.amp(0.08);
+  envelopeImpacto = new p5.Envelope();
+  envelopeImpacto.setADSR(0.01, 0.1, 0.1, 0.4);
+  envelopeImpacto.setRange(0.4, 0);
+  osciladorImpacto = new p5.Oscillator('triangle');
+  osciladorImpacto.freq(120);
+  osciladorImpacto.amp(envelopeImpacto);
+
+  // Partículas de cena
+  nuvens = []; passaros = []; graos = []; bovinos = []; poeira = []; brasas = []; menuStars = [];
+  for (var i = 0; i < 14; i++) nuvens.push({ x: random(width), y: random(25, 115), w: random(85, 215), vel: random(0.05, 0.22), alpha: random(150, 235) });
+  for (var i = 0; i < 9; i++) passaros.push({ x: random(width), y: random(50, 145), tam: random(4, 10), vel: random(0.3, 1.0), fase: random(TWO_PI) });
+  for (var i = 0; i < 240; i++) graos.push({ x: random(width * 0.1, width * 0.9), y: random(-650, -5), vy: random(2.5, 7.5), vx: random(-0.8, 0.8), r: random(3, 7.5), ativo: true });
+  for (var i = 0; i < 30; i++) bovinos.push({ x: random(60, width - 60), y: random(80, height - 80), ang: random(TWO_PI), vel: random(0.10, 0.45), tipo: floor(random(3)), tam: random(12, 22) });
+  for (var i = 0; i < 80; i++) poeira.push({ x: random(width), y: random(90, height - 50), t: random(2, 9), a: random(12, 48) });
+  for (var i = 0; i < 60; i++) brasas.push({ x: random(width), y: random(height), vy: random(-1.5, -0.22), a: random(100, 225), t: random(1, 4) });
+  for (var i = 0; i < 110; i++) menuStars.push({ x: random(width), y: random(height * 0.56), r: random(0.5, 2.5) });
+  for (var i = 0; i < 70; i++) windParts.push({ x: random(width), y: random(height), speed: random(2, 8), alpha: random(20, 90), len: random(15, 55), curveAmp: random(1, 4), t: random(TWO_PI) });
+  for (var i = 0; i < 60; i++) stormParts.push({ x: random(width), y: random(height), len: random(8, 22), spd: random(12, 28), a: random(60, 180) });
+
+  zBuf = new Float32Array(width);
+
+  // Grade de plantação
+  iniciarPlantacao();
+
+  try { var s = localStorage.getItem('agrinho2026_v8'); if (s) phasesUnlocked = JSON.parse(s); } catch (e) { }
+}
+
+// ═════════════════════════════════════════════════════════════
+// TEXTURAS
+// ═════════════════════════════════════════════════════════════
+
+const TEX = 64;
+
+let txWall = [];
+let txTree = [];
+let txBarn = [];
+let txCorn = [];
+let txRock = [];
+function buildTextures() {
+  txWall = []; txTree = []; txBarn = []; txCorn = []; txRock = [];
+  for (var v = 0; v < TEX; v++) for (var u = 0; u < TEX; u++) {
+    var row = floor(v / 8), col2 = floor(u / 16), off = (row % 2) * 8, bu = (u + off) % 16;
+    var mortar = (bu < 1 || bu > 14 || v % 8 < 1 || v % 8 > 6) ? 0.25 : 1.0;
+    var rough = noise(u * 0.22 + row * 7.3, v * 0.18) * 0.28 + sin(u * 1.1 + v * 0.3) * 0.06 + 0.75;
+    txWall.push(rough * mortar);
+  }
+  for (var v = 0; v < TEX; v++) for (var u = 0; u < TEX; u++) {
+    var grain = noise(u * 0.09 + v * 0.55, v * 0.12) * 0.45;
+    var streak = sin(u * 0.25 + noise(v * 0.08) * 3) * 0.12;
+    var knot = (noise(u * 0.55, v * 0.38) > 0.70) ? 0.35 : 1.0;
+    txTree.push((grain + streak + 0.55) * knot);
+  }
+  for (var v = 0; v < TEX; v++) for (var u = 0; u < TEX; u++) {
+    var grain = noise(u * 0.06 + v * 0.02, v * 0.5) * 0.38;
+    var gap = (u % 10 < 1) ? 0.18 : 1.0;
+    var scratch = sin(v * 0.8 + u * 0.04) * 0.07;
+    txBarn.push((grain + scratch + 0.62) * gap);
+  }
+  for (var v = 0; v < TEX; v++) for (var u = 0; u < TEX; u++) {
+    var vein = max(0, 1 - abs(u - TEX / 2) * 0.12);
+    var leaf = noise(u * 0.15, v * 0.18) * 0.30 + vein * 0.35 + 0.50;
+    var stripe = sin(v * 0.55) * 0.08;
+    txCorn.push(min(leaf + stripe, 1.0));
+  }
+  for (var v = 0; v < TEX; v++) for (var u = 0; u < TEX; u++) {
+    var base = noise(u * 0.22, v * 0.22) * 0.42 + 0.48;
+    var crack = (noise(u * 0.38 + 100, v * 0.38 + 100) > 0.62) ? 0.30 : 1.0;
+    var chip = noise(u * 0.8, v * 0.8) * 0.15;
+    txRock.push((base + chip) * crack);
+  }
+}
+function getTex(tile, col, row) {
+  var u = constrain(col, 0, TEX - 1), v = constrain(row, 0, TEX - 1), idx = v * TEX + u;
+  switch (tile) { case 1: return txWall[idx]; case 2: return txTree[idx]; case 3: return txBarn[idx]; case 4: return txCorn[idx]; case 5: return txRock[idx]; default: return 0.85; }
+}
+
+// ═════════════════════════════════════════════════════════════
+// ÁUDIO
+// ═════════════════════════════════════════════════════════════
+function iniciarMusicaTrailer() {
+  if (musicInited) return; musicInited = true;
+  padOscs = [];
+  var det = [-0.004, 0, 0.004];
+  for (var i = 0; i < 3; i++) { var o = new p5.Oscillator('sawtooth'); o.freq(ACORDES[0][i] * (1 + det[i])); o.amp(0); o.start(); padOscs.push(o); }
+  bassOsc = new p5.Oscillator('sine'); bassOsc.freq(BAIXO_FREQS[0]); bassOsc.amp(0); bassOsc.start();
+  melodyEnv = new p5.Envelope(); melodyEnv.setADSR(0.02, 0.18, 0.3, 0.6); melodyEnv.setRange(0.12, 0);
+  melodyOsc = new p5.Oscillator('triangle'); melodyOsc.freq(329.63); melodyOsc.amp(melodyEnv); melodyOsc.start();
+  hihatEnv = new p5.Envelope(); hihatEnv.setADSR(0.001, 0.04, 0.01, 0.08); hihatEnv.setRange(0.04, 0);
+  hihatOsc = new p5.Oscillator('square'); hihatOsc.freq(8000); hihatOsc.amp(hihatEnv); hihatOsc.start();
+  kickEnv = new p5.Envelope(); kickEnv.setADSR(0.001, 0.12, 0.01, 0.2); kickEnv.setRange(0.18, 0);
+  kickOsc = new p5.Oscillator('sine'); kickOsc.freq(55); kickOsc.amp(kickEnv); kickOsc.start();
+}
+function musicUpdate() {
+  if (!musicAtiva || !musicInited) return;
+  musicFrame++;
+  if (musicFrame >= proxAcorde) { proxAcorde = musicFrame + ACORDE_DUR; acordeAtual = (acordeAtual + 1) % ACORDES.length; for (var i = 0; i < padOscs.length; i++) padOscs[i].freq(ACORDES[acordeAtual][i] * (1 + (i - 1) * 0.004)); bassOsc.freq(BAIXO_FREQS[acordeAtual]); }
+  if (musicFrame >= proxNota) { proxNota = musicFrame + MELODIA_DUR; var fr = MELODIA_FREQS[melodiaIdx % MELODIA_FREQS.length]; melodiaIdx++; if (fr > 0) { melodyOsc.freq(fr); melodyEnv.play(melodyOsc); } }
+  if (musicFrame >= proxKick) { proxKick = musicFrame + 120; kickEnv.play(kickOsc); }
+  if (musicFrame % 30 === 15) hihatEnv.play(hihatOsc);
+  for (var i = 0; i < padOscs.length; i++) padOscs[i].amp(0.045, 0.3);
+  bassOsc.amp(0.08, 0.3);
+}
+function pararMusicaTrailer() {
+  musicAtiva = false; if (!musicInited) return;
+  for (var i = 0; i < padOscs.length; i++) padOscs[i].amp(0, 1.5);
+  if (bassOsc) bassOsc.amp(0, 1.5);
+}
+function initGameAudio() {
+  if (audioReady) return; audioReady = true;
+  windNoise = new p5.Noise('pink'); windNoise.amp(0); windNoise.start();
+  stepEnv = new p5.Envelope(); stepEnv.setADSR(0.001, 0.06, 0.01, 0.12); stepEnv.setRange(0.08, 0);
+  stepOsc = new p5.Oscillator('sine'); stepOsc.freq(90); stepOsc.amp(stepEnv); stepOsc.start();
+  pickupEnv = new p5.Envelope(); pickupEnv.setADSR(0.005, 0.15, 0.1, 0.3); pickupEnv.setRange(0.12, 0);
+  pickupOsc = new p5.Oscillator('triangle'); pickupOsc.freq(660); pickupOsc.amp(pickupEnv); pickupOsc.start();
+  dialogEnv = new p5.Envelope(); dialogEnv.setADSR(0.005, 0.1, 0.05, 0.2); dialogEnv.setRange(0.06, 0);
+  dialogOsc = new p5.Oscillator('sine'); dialogOsc.freq(440); dialogOsc.amp(dialogEnv); dialogOsc.start();
+}
+function updateGameAudio() {
+  if (!audioReady) return;
+  var targetWind = (campaignActive && campaignState === 'gameplay') || sandboxActive ? 0.05 : 0;
+  windAmp += (targetWind - windAmp) * 0.02;
+  windNoise.amp(windAmp);
+}
+function playStep() { if (!audioReady) return; stepOsc.freq(80 + random(40)); stepEnv.play(stepOsc); }
+function playPickup() { if (!audioReady) return; pickupOsc.freq(660); pickupEnv.play(pickupOsc); setTimeout(function () { if (pickupOsc) { pickupOsc.freq(880); pickupEnv.play(pickupOsc); } }, 80); }
+function playDialog() { if (!audioReady) return; dialogOsc.freq(350 + random(60)); dialogEnv.play(dialogOsc); }
+
+// ═════════════════════════════════════════════════════════════
+// DRAW PRINCIPAL
+// ═════════════════════════════════════════════════════════════
+function draw() {
+  background(0);
+  updateGameAudio();
+  var td = millis() - tempoEstado;
+  switch (estadoTela) {
+    case 0: desenharTelaClique(); break;
+    case 1: desenharTelaAviso(); if (td > 5200) mudarEstado(2); break;
+    case 2: desenharTelaEstudio(td); if (td > 6200) mudarEstado(3); break;
+    case 3: desenharMenuPrincipal(); break;
+    case 4: rodarJogoPrincipal(); break;
+  }
+  rodapeCreditos();
+}
+
+// ═════════════════════════════════════════════════════════════
+// TELAS INTRO
+// ═════════════════════════════════════════════════════════════
+function desenharTelaClique() {
+  for (var y = 0; y < height; y++) {
+    var t = y / height;
+    stroke(lerp(72, 38, t), lerp(128, 88, t), lerp(188, 138, t));
+    line(0, y, width, y);
+  }
+  noStroke();
+  desenharSol(width * 0.72, height * 0.22, 60);
+  fill(28, 55, 18);
+  beginShape(); vertex(0, height);
+  for (var x = 0; x <= width; x += 8) vertex(x, height * 0.7 + noise(x * 0.01 + frameCount * 0.001) * height * 0.08);
+  vertex(width, height); endShape(CLOSE);
+  noStroke(); fill(0, 140); rect(width / 2 - 280, height / 2 - 80, 560, 160, 12);
+  fill(255, 235, 120); textAlign(CENTER, CENTER); textFont('Georgia'); textStyle(BOLD); textSize(36);
+  text('AGRINHO 2026', width / 2, height / 2 - 40);
+  fill(200, 240, 160); textSize(18); textStyle(NORMAL);
+  text('Agro forte, futuro sustentável', width / 2, height / 2 + 5);
+  var p2 = sin(frameCount * 0.055) * 255;
+  fill(120, 255, 120, abs(p2)); textFont('Courier New'); textSize(14);
+  text('[ CLIQUE PARA INICIAR ]', width / 2, height / 2 + 52);
+  textStyle(NORMAL);
+}
+
+function desenharTelaAviso() {
+  for (var y = 0; y < height; y++) { stroke(lerp(8, 22, y / height), lerp(18, 48, y / height), lerp(8, 18, y / height)); line(0, y, width, y); }
+  noStroke(); fill(0, 160); rect(width / 2 - 320, height / 2 - 90, 640, 180, 12);
+  fill(200, 240, 160); textAlign(CENTER, CENTER); textFont('Courier New'); textSize(13);
+  text('AVISO — Concurso Agrinho 2026\n\nEste jogo simula desafios da produção agrícola.\nAlinhado ao tema: Equilíbrio entre produção e meio ambiente.\nNenhuma violência — apenas ciência, tecnologia e sustentabilidade.', width / 2, height / 2);
+  fill(140, 200, 120, 160); textSize(10); text('Personagens fictícios. Dados baseados em relatórios ambientais reais.', width / 2, height / 2 + 70);
+}
+
+function desenharTelaEstudio(td) {
+  for (var y = 0; y < height; y++) { stroke(lerp(4, 18, y / height), lerp(8, 28, y / height), lerp(4, 12, y / height)); line(0, y, width, y); }
+  var op = map(td, 0, 1500, 0, 255, true);
+  noStroke(); fill(0, 160); rect(width / 2 - 260, height / 2 - 80, 520, 160, 10);
+  fill(255, op); textAlign(CENTER, CENTER); textFont('Georgia'); textStyle(BOLD); textSize(28); text('AGRINHO 2026', width / 2, height / 2 - 28);
+  fill(180, 240, 140, op); textSize(15); textStyle(NORMAL); text('Agro forte, futuro sustentável', width / 2, height / 2 + 12);
+  fill(130, 180, 110, op * 0.8); textFont('Courier New'); textSize(11); text('Uma solução tecnológica para o campo', width / 2, height / 2 + 42);
+  push(); stroke(120, 220, 80, op); strokeWeight(1.5); noFill();
+  anguloCubo += 0.018;
+  desenharCubo(width / 2, height / 2 - 115, 35, anguloCubo); pop();
+}
+
+function desenharMenuPrincipal() {
+  for (var y = 0; y < height; y++) { var t = y / height; stroke(lerp(8, 22, t), lerp(18, 58, t), lerp(8, 22, t)); line(0, y, width, y); }
+  for (var i = 0; i < menuStars.length; i++) { var s = menuStars[i]; noStroke(); fill(255, 255, 220, 80 + sin(frameCount * 0.04 + i) * 60); ellipse(s.x, s.y, s.r); }
+  menuCam = (menuCam || 0) + 0.3;
+  fill(22, 55, 18); beginShape(); vertex(0, height);
+  for (var x = 0; x <= width; x += 7) vertex(x, height * 0.62 + noise(x * 0.008 + menuCam * 0.001) * height * 0.06);
+  vertex(width, height); endShape(CLOSE);
+  fill(28, 80, 22); beginShape(); vertex(0, height);
+  for (var x = 0; x <= width; x += 6) vertex(x, height * 0.70 + noise(x * 0.012 + menuCam * 0.0008 + 10) * height * 0.06);
+  vertex(width, height); endShape(CLOSE);
+  desenharSol(width * 0.75, height * 0.18, 55);
+  for (var i = 0; i < nuvens.length; i++) { var n = nuvens[i]; n.x -= n.vel * 0.6; if (n.x < -n.w) n.x = width + n.w; desenhaNuvem(n.x, n.y, n.w, n.alpha, false); }
+  for (var i = 0; i < 5; i++) { var b = passaros[i]; b.x += b.vel * 0.8; b.fase += 0.06; if (b.x > width + 20) b.x = -20; noStroke(); stroke(18, 18, 28, 90); strokeWeight(1.2); var bat = sin(b.fase) * b.tam * 0.55; beginShape(); vertex(b.x - b.tam, b.y + bat); vertex(b.x, b.y); vertex(b.x + b.tam, b.y + bat); endShape(); }
+  noStroke(); fill(0, 200); rect(width / 2 - 310, 30, 620, 90, 12);
+  fill(255, 240, 100); textAlign(CENTER, CENTER); textFont('Georgia'); textStyle(BOLD); textSize(32); text('AGRINHO 2026', width / 2, 62);
+  fill(180, 240, 140); textSize(15); textStyle(NORMAL); text('Agro forte, futuro sustentável', width / 2, 92);
+  var bW = 210, bH = 52, bGap = 18, totalW = 3 * bW + 2 * bGap, bX0 = (width - totalW) / 2, bY = height / 2 + 10;
+  for (var i = 0; i < 3; i++) {
+    var bx = bX0 + i * (bW + bGap), hover = (mouseX > bx && mouseX < bx + bW && mouseY > bY && mouseY < bY + bH);
+    noStroke(); fill(hover ? color(40, 120, 30, 235) : color(15, 55, 12, 210));
+    if (hover) { stroke(100, 220, 80); strokeWeight(2); } else { stroke(50, 120, 40); strokeWeight(1); }
+    rect(bx, bY, bW, bH, 8); noStroke();
+    fill(hover ? color(220, 255, 165) : color(160, 220, 100)); textFont('Courier New'); textStyle(BOLD); textSize(15); textAlign(CENTER, CENTER);
+    text(OPCOES_MENU[i], bx + bW / 2, bY + bH / 2);
+    textStyle(NORMAL); textSize(10); fill(120, 200, 90, 180);
+    var desc = ['6 FASES NARRATIVAS', 'MODO LIVRE', 'SIMULAÇÃO AGRÍCOLA'][i];
+    text(desc, bx + bW / 2, bY + bH / 2 + 17);
+    if (hover) menuHover = i;
+  }
+  if (!(mouseX > bX0 && mouseX < bX0 + totalW && mouseY > bY && mouseY < bY + bH + 10)) menuHover = -1;
+  fill(80, 140, 60, 140); textFont('Courier New'); textSize(9); textAlign(CENTER, BOTTOM);
+  text('[R] Rever Trailer  |  Clique para selecionar modo', width / 2, height - 32);
+  textAlign(LEFT, TOP); textStyle(NORMAL);
+}
+
+let menuCam = 0;
+
+function rodapeCreditos() {
+  push(); textAlign(RIGHT, BOTTOM); textFont('Arial'); textSize(10); fill(80, 80, 80, 180); noStroke();
+  text('© Agrinho 2026 — Todos os direitos reservados.', width - 10, height - 6); pop();
+}
+
+function desenharCubo(cx, cy, t, ang) {
+  var v = [{ x: -t, y: -t, z: -t }, { x: t, y: -t, z: -t }, { x: t, y: t, z: -t }, { x: -t, y: t, z: -t }, { x: -t, y: -t, z: t }, { x: t, y: -t, z: t }, { x: t, y: t, z: t }, { x: -t, y: t, z: t }];
+  var p2 = []; for (var i = 0; i < v.length; i++) { var x1 = v[i].x * cos(ang) - v[i].z * sin(ang); var z1 = v[i].x * sin(ang) + v[i].z * cos(ang); var y2 = v[i].y * cos(0.4) - z1 * sin(0.4); p2.push({ x: cx + x1, y: cy + y2 }); }
+  for (var i = 0; i < 4; i++) { line(p2[i].x, p2[i].y, p2[(i + 1) % 4].x, p2[(i + 1) % 4].y); line(p2[i + 4].x, p2[i + 4].y, p2[((i + 1) % 4) + 4].x, p2[((i + 1) % 4) + 4].y); line(p2[i].x, p2[i].y, p2[i + 4].x, p2[i + 4].y); }
+}
+
+// ═════════════════════════════════════════════════════════════
+// SOL MELHORADO
+// ═════════════════════════════════════════════════════════════
+function desenharSol(sx, sy, raio) {
+  noStroke();
+  for (var r = raio * 3.5; r > raio * 1.8; r -= 3) {
+    var a = map(r, raio * 1.8, raio * 3.5, 80, 0);
+    fill(255, 240, 120, a); ellipse(sx, sy, r * 2, r * 2);
+  }
+  var numRaios = 18;
+  for (var i = 0; i < numRaios; i++) {
+    var ang = TWO_PI / numRaios * i + frameCount * 0.004;
+    var r1 = raio * 1.3, r2 = raio * (2.0 + sin(frameCount * 0.03 + i) * 0.3);
+    var al = 40 + sin(frameCount * 0.05 + i * 0.7) * 20;
+    stroke(255, 248, 180, al); strokeWeight(2 + sin(frameCount * 0.05 + i) * 1);
+    line(sx + cos(ang) * r1, sy + sin(ang) * r1, sx + cos(ang) * r2, sy + sin(ang) * r2);
+  }
+  noStroke();
+  for (var r = raio * 1.6; r > raio * 1.1; r -= 2) {
+    var a2 = map(r, raio * 1.1, raio * 1.6, 120, 0);
+    fill(255, 232, 100, a2); ellipse(sx, sy, r * 2, r * 2);
+  }
+  fill(255, 255, 220); ellipse(sx, sy, raio * 2, raio * 2);
+  fill(255, 255, 255, 180); ellipse(sx, sy, raio * 1.3, raio * 1.3);
+  fill(255, 255, 240); ellipse(sx, sy, raio * 0.6, raio * 0.6);
+}
+
+// ═════════════════════════════════════════════════════════════
+// ROTEADOR
+// ═════════════════════════════════════════════════════════════
+function rodarJogoPrincipal() {
+  if (trailerAtivo) { executarTrailer(); return; }
+  if (plantActive) { executarPlantacao(); return; }
+  if (sandboxActive) { executarSandbox(); return; }
+  if (campaignActive) { executarCampanha(); return; }
+  executarMenuJogo();
+}
+
+// ═════════════════════════════════════════════════════════════
+// MENU JOGO
+// ═════════════════════════════════════════════════════════════
+function executarMenuJogo() {
+  desenharMenuPrincipal();
+}
+
+// ═════════════════════════════════════════════════════════════
+// TRAILER
+// ═════════════════════════════════════════════════════════════
+function executarTrailer() {
+  trailerFrame++; musicUpdate();
+  if (trailerFrame <= 480) { cam1 += 1.6; cena1(); }
+  else if (trailerFrame <= 720) { cena1b(); }
+  else if (trailerFrame <= 1140) { cam2 += 1.1; cena2(); }
+  else if (trailerFrame <= 1380) { cam2b += 0.45; cena2b(); }
+  else if (trailerFrame <= 1860) { cena3(); }
+  else if (trailerFrame <= 2160) { cena4(); }
+  else if (trailerFrame <= 2460) { cena4b(); }
+  else if (trailerFrame <= 2760) { cena5(); }
+  else { finalizarTrailer(); return; }
+  hudTrailer();
+  desenharFade();
+  if (trailerFrame > 90) {
+    noStroke(); fill(255, 32); textFont('Courier New'); textStyle(NORMAL); textAlign(RIGHT, BOTTOM); textSize(10);
+    text('[ESPAÇO] Pular', width - 14, height - 10);
+  }
+}
+
+function hudTrailer() {
+  noFill(); stroke(80, 220, 80, 35); strokeWeight(1);
+  for (var gx = 0; gx <= width; gx += 55) line(gx, 0, gx, height);
+  for (var gy = 0; gy <= height; gy += 45) line(0, gy, width, gy);
+  stroke(80, 220, 80, 80); strokeWeight(1.5);
+  var cs = 18;
+  line(0, 0, cs, 0); line(0, 0, 0, cs);
+  line(width - cs, 0, width, 0); line(width, 0, width, cs);
+  line(0, height - cs, 0, height); line(0, height, cs, height);
+  line(width - cs, height, width, height); line(width, height - cs, width, height);
+  noStroke(); fill(0, 110); rect(10, 10, 220, 28, 3);
+  fill(80, 220, 80); textFont('Courier New'); textAlign(LEFT, CENTER); textSize(9); textStyle(NORMAL);
+  var minutos = floor(trailerFrame / 60), segundos = floor(trailerFrame % 60);
+  text('◉ AGRINHO 2026  ' + nf(minutos, 2) + ':' + nf(segundos, 2), 18, 24);
+  fill(0, 110); rect(width - 190, 10, 180, 28, 3);
+  fill(80, 200, 80); textAlign(RIGHT, CENTER); textSize(9);
+  text('DRONE ▸ MODO GRAVAÇÃO', width - 18, 24);
+  noStroke(); textAlign(LEFT, TOP); textStyle(NORMAL);
+}
+
+function desenharFade() {
+  var cortes = [458, 698, 1118, 1358, 1838, 2138, 2438, 2738];
+  var M = 22, alpha = 0;
+  for (var i = 0; i < cortes.length; i++) {
+    var t = cortes[i];
+    if (trailerFrame >= t - M && trailerFrame < t) { alpha = map(trailerFrame, t - M, t, 0, 255); break; }
+    if (trailerFrame >= t && trailerFrame < t + M) { alpha = map(trailerFrame, t, t + M, 255, 0); break; }
+  }
+  if (alpha > 0) { noStroke(); fill(0, alpha); rect(0, 0, width, height); }
+}
+
+function finalizarTrailer() {
+  trailerAtivo = false; trailerFrame = 0; cam1 = 0; cam2 = 0; cam2b = 0;
+  pararMusicaTrailer();
+  try { localStorage.setItem('agrinho2026_trailer', '1'); } catch (e) { }
+}
+
+// ─── CENA 1 — Panorama aéreo de campo ────────────────────────
+function cena1() {
+  var bank = sin(cam1 * 0.018) * 0.026;
+  var horizLift = cos(cam1 * 0.011) * 5;
+  var HORZ = 170 + horizLift;
+  noStroke();
+  for (var y = 0; y < HORZ + 8; y++) {
+    var t = map(y, 0, HORZ, 0, 1);
+    stroke(lerp(162, 215, t), lerp(185, 225, t), lerp(205, 235, t)); line(0, y, width, y);
+  }
+  noStroke();
+  desenharSol(width * 0.76, HORZ * 0.38, 38);
+  for (var i = 0; i < 12; i++) {
+    var cx = (i * 72 + cam1 * 0.08) % (width + 140) - 70;
+    var cy = 18 + noise(i * 2.1) * 55;
+    var cw = 100 + noise(i * 1.5) * 140;
+    desenhaNuvem(cx, cy, cw, 185 + noise(i) * 40, false);
+  }
+  var mts = [{ off: 0, esc: 0.0025, amp: 52, base: 142, r: 122, g: 138, b: 150, a: 140 }, { off: 80, esc: 0.0035, amp: 36, base: 150, r: 145, g: 160, b: 168, a: 115 }, { off: 180, esc: 0.005, amp: 22, base: 158, r: 172, g: 182, b: 190, a: 88 }];
+  for (var mi = 0; mi < mts.length; mi++) {
+    var m = mts[mi]; fill(m.r, m.g, m.b, m.a); beginShape(); vertex(0, height);
+    for (var x = 0; x <= width; x += 7) vertex(x, m.base + horizLift + noise(x * m.esc + m.off) * m.amp);
+    vertex(width, height); endShape(CLOSE);
+  }
+  push(); translate(width / 2, height / 2); rotate(bank); translate(-width / 2, -height / 2);
+  fill(24, 68, 18); rect(0, HORZ, width, height - HORZ);
+  for (var linha = 0; linha <= 64; linha++) {
+    var prof = linha / 64;
+    var yBase = map(pow(prof, 1.72), 0, 1, HORZ, height + 14);
+    if (yBase > height + 14) break;
+    var nv = noise(cam1 * 0.001 + linha * 0.07) * 60;
+    fill(12 + nv * 0.2, 120 + nv, 16 + nv * 0.15);
+    beginShape();
+    for (var x = -25; x <= width + 25; x += 9) { var xM = x + cam1; var o = sin(xM * 0.008 + linha * 0.52) * (2 + linha * 0.20) + noise(xM * 0.003, linha * 0.11) * (6 + linha * 0.45); vertex(x, yBase + o); }
+    for (var x = width + 25; x >= -25; x -= 9) { var xM = x + cam1; var o = sin(xM * 0.008 + linha * 0.52) * (2 + linha * 0.20) + noise(xM * 0.003, linha * 0.11) * (6 + linha * 0.45); vertex(x, yBase + o + (2 + prof * 18)); }
+    endShape(CLOSE);
+  }
+  pop();
+  for (var i = 0; i < passaros.length; i++) { var b = passaros[i]; b.x += b.vel; b.fase += 0.08; if (b.x > width + 20) b.x = -20; var bat = sin(b.fase) * b.tam * 0.55; stroke(18, 18, 28, 80); strokeWeight(1.2); noFill(); beginShape(); vertex(b.x - b.tam, b.y + bat); vertex(b.x, b.y); vertex(b.x + b.tam, b.y + bat); endShape(); noStroke(); }
+  bordaEscura();
+}
+
+// ─── CENA 1B — Grãos caindo + texto ──────────────────────────
+function cena1b() {
+  var f = trailerFrame - 480;
+  noStroke(); fill(18, 12, 8); rect(0, 0, width, height);
+  stroke(35, 28, 22, 50); strokeWeight(1); for (var y = 0; y < height; y += 30) line(0, y, width, y); for (var x = 0; x < width; x += 30) line(x, 0, x, height);
+  var pilhaY = map(f, 20, 240, height + 20, height * 0.38);
+  noStroke();
+  for (var y = int(pilhaY); y < height; y++) { var t = map(y, pilhaY, height, 0, 1); stroke(lerp(220, 168, t), lerp(152, 105, t), lerp(28, 18, t)); line(0, y, width, y); }
+  noStroke();
+  for (var gi = 0; gi < graos.length; gi++) {
+    var g = graos[gi];
+    if (g.ativo) { g.y += g.vy; g.x += g.vx + sin(g.y * 0.04) * 0.3; if (g.y > height * 0.85) g.ativo = false; }
+    if (g.y > -15 && g.y < height + 10) {
+      var ga = g.y < 0 ? map(g.y, -30, 0, 0, 230) : 230;
+      fill(200 + noise(gi) * 22, 138 + noise(gi * 2) * 22, 20 + noise(gi * 3) * 15, ga);
+      push(); translate(g.x, g.y); rotate(g.x * 0.04 + g.y * 0.01); ellipse(0, 0, g.r * 1.65, g.r); pop();
+    }
+  }
+  bordaEscura();
+  if (f > 52) {
+    var af = min((f - 52) * 5, 225);
+    noStroke(); fill(0, af * 0.62); rect(width * 0.08, height * 0.09, width * 0.84, 76, 6);
+    fill(240, 218, 142, af); textFont('Courier New'); textAlign(CENTER, CENTER); textStyle(BOLD); textSize(28);
+    text('A TERRA QUE NOS ALIMENTA', width / 2, height * 0.172);
+    textStyle(NORMAL); textSize(16); fill(202, 180, 110, af * 0.82);
+    text('O agronegócio é a espinha dorsal do Brasil', width / 2, height * 0.252);
+  }
+}
+
+// ─── CENA 2 — Floresta panorâmica ────────────────────────────
+function cena2() {
+  var f = trailerFrame - 720;
+  var pan = map(f, 0, 420, 90, -90);
+  noStroke();
+  for (var y = 0; y < 205; y++) { var t = map(y, 0, 205, 0, 1); stroke(lerp(50, 155, t), lerp(60, 162, t), lerp(74, 168, t)); line(0, y, width, y); }
+  for (var i = 0; i < nuvens.length; i++) { var n = nuvens[i]; n.x -= n.vel * 0.55; if (n.x < -n.w) n.x = width + n.w; desenhaNuvem(n.x + pan * 0.12, n.y, n.w, 108, true); }
+  var panedX = pan * 0.65;
+  fill(42, 68, 35); beginShape(); vertex(-15, height);
+  for (var x = -15; x <= width + 15; x += 6) vertex(x, 165 + pan * 0.04 + noise(x * 0.005 + 200) * 34);
+  vertex(width + 15, height); endShape(CLOSE);
+  fill(22, 42, 18, 210);
+  for (var i = 0; i < 24; i++) {
+    var ax = noise(i * 4.1) * (width * 0.9) + panedX * 0.4;
+    var ah = 60 + noise(i * 2.8) * 95;
+    var aw = 16 + noise(i * 1.3) * 22;
+    if (ax > 0 && ax < width) {
+      beginShape(); vertex(ax, height * 0.68); vertex(ax - aw, height * 0.68);
+      vertex(ax - aw * 0.3, height * 0.68 - ah); vertex(ax + aw * 0.3, height * 0.68 - ah);
+      vertex(ax + aw, height * 0.68); endShape(CLOSE);
+    }
+  }
+  bordaEscura();
+  var af = min((trailerFrame - 720) * 4, 160);
+  noStroke(); fill(0, af * 0.62); rect(12, 12, 210, 44, 4);
+  fill(80, 220, 80, af); textFont('Courier New'); textAlign(LEFT, CENTER); textStyle(NORMAL); textSize(10);
+  text('ALT: 125m  |  FLORESTA', 20, 27);
+  text('ZONA DE PRESERVAÇÃO PERMANENTE', 20, 43);
+  if (f > 200) {
+    var a2 = min((f - 200) * 5, 200);
+    noStroke(); fill(0, a2 * 0.65); rect(width * 0.08, height * 0.78, width * 0.84, 52, 6);
+    fill(80, 220, 100, a2); textAlign(CENTER, CENTER); textStyle(BOLD); textSize(20);
+    text('DESMATAMENTO AMEAÇA 9,5 MILHÕES DE HECTARES', width / 2, height * 0.82); textStyle(NORMAL);
+  }
+}
+
+// ─── CENA 2B — Vista satélite com gado ───────────────────────
+function cena2b() {
+  var drift = sin(cam2b * 0.022) * 8;
+  noStroke();
+  for (var y = 0; y < height; y++) { var t = map(y, 0, height, 0, 1); stroke(lerp(22, 58, t), lerp(72, 128, t), lerp(18, 40, t)); line(0, y, width, y); }
+  noStroke(); for (var i = 0; i < 180; i++) { var gx = noise(i * 3.1, cam2b * 0.002) * width; var gy = noise(i * 2.7, cam2b * 0.003) * height; fill(18, 55, 14, 50); ellipse(gx + drift, gy + drift * 0.4, 8 + noise(i) * 12, 4 + noise(i * 2) * 6); }
+  stroke(198, 194, 184, 165); strokeWeight(2); line(0, height * 0.36, width, height * 0.36); line(width * 0.49, 0, width * 0.49, height); strokeWeight(1.5); line(0, height * 0.69, width, height * 0.69);
+  noStroke(); fill(178, 168, 142); for (var x = 0; x < width; x += 44) { ellipse(x, height * 0.36, 5, 5); ellipse(x, height * 0.69, 5, 5); } for (var y = 0; y < height; y += 44) ellipse(width * 0.49, y, 5, 5);
+  for (var bi = 0; bi < bovinos.length; bi++) {
+    var bov = bovinos[bi]; bov.x += cos(bov.ang) * bov.vel + drift * 0.015; bov.y += sin(bov.ang) * bov.vel; bov.ang += random(-0.04, 0.04);
+    bov.x = constrain(bov.x, 22, width - 22); bov.y = constrain(bov.y, 22, height - 22);
+    noStroke(); fill(0, 36); ellipse(bov.x + 4, bov.y + 4, bov.tam * 1.8, bov.tam);
+    var cr = bov.tipo === 0 ? 35 : bov.tipo === 1 ? 108 : 196;
+    var cg = bov.tipo === 0 ? 30 : bov.tipo === 1 ? 68 : 186;
+    var cb2 = bov.tipo === 0 ? 28 : bov.tipo === 1 ? 32 : 172;
+    fill(cr, cg, cb2); push(); translate(bov.x, bov.y); rotate(bov.ang); ellipse(0, 0, bov.tam * 1.8, bov.tam); fill(cr - 14, cg - 14, cb2 - 14); ellipse(bov.tam * 0.68, 0, bov.tam * 0.58, bov.tam * 0.46); pop();
+  }
+  bordaEscura();
+  var af = min((trailerFrame - 1140) * 4, 160);
+  noStroke(); fill(0, af * 0.62); rect(12, 12, 215, 46, 4);
+  fill(118, 218, 108, af); textFont('Courier New'); textAlign(LEFT, CENTER); textStyle(NORMAL); textSize(10);
+  text('ALT: 82m  ▼  MODO SATÉLITE', 22, 28); text('PECUÁRIA — ZONA DE PASTAGEM', 22, 44);
+}
+
+// ─── CENA 3 — Problemas ambientais ───────────────────────────
+function cena3() {
+  var f = trailerFrame - 1380;
+  noStroke(); fill(8, 5, 3); rect(0, 0, width, height);
+  for (var i = 0; i < 28; i++) { fill(255, 3); rect(0, (i * 20 + f * 0.18) % height, width, 1); }
+  var idx = f < 200 ? 0 : f < 400 ? 1 : 2;
+  var fLocal = f < 200 ? f : f < 400 ? f - 200 : f - 400;
+  var prob = PROBLEMAS[idx];
+  var al = fLocal < 30 ? map(fLocal, 0, 30, 0, 255) : fLocal > 165 ? map(fLocal, 165, 200, 255, 0) : 255;
+  var pr = prob.r, pg = prob.g, pb2 = prob.b;
+  noStroke(); fill(pr, pg, pb2, al); rect(width * 0.07, height * 0.22, 5, height * 0.56);
+  textFont('Courier New'); textAlign(LEFT, CENTER); textStyle(NORMAL); textSize(14); fill(pr, pg, pb2, al * 0.88);
+  text('PROBLEMA ' + (idx + 1) + ' / 3  —  ' + prob.sub, width * 0.12, height * 0.28);
+  stroke(pr, pg, pb2, al * 0.4); strokeWeight(1); line(width * 0.12, height * 0.345, width * 0.90, height * 0.345);
+  noStroke(); textAlign(CENTER, CENTER); textStyle(BOLD); textSize(56); fill(0, al * 0.72); text(prob.titulo, width / 2 + 3, height * 0.50 + 3); fill(245, 232, 205, al); text(prob.titulo, width / 2, height * 0.50);
+  noStroke(); fill(0, al * 0.60); rect(width * 0.09, height * 0.600, width * 0.82, 88, 6);
+  textStyle(NORMAL); textSize(21); fill(215, 198, 162, al * 0.92); text(prob.l1, width / 2, height * 0.646);
+  textSize(18); fill(188, 172, 138, al * 0.82); text(prob.l2, width / 2, height * 0.726);
+  var pulse = sin(f * 0.13) * 9; noFill(); stroke(pr, pg, pb2, al * 0.22); strokeWeight(1.5); ellipse(width / 2, height * 0.50, 348 + pulse, 94 + pulse); noStroke(); textStyle(NORMAL);
+}
+
+// ─── CENA 4 — Incêndio / destruição ──────────────────────────
+function cena4() {
+  var f = trailerFrame - 1860;
+  var shk = sin(f * 0.8) * 1.5;
+  noStroke();
+  for (var y = 0; y < height; y++) { var t = map(y, 0, height, 0, 1); stroke(lerp(5, 100, t), lerp(3, 27, t), lerp(7, 10, t)); line(0, y, width, y); }
+  for (var layer = 0; layer < 3; layer++) {
+    for (var i = 0; i < 38; i++) { var px = ((i * 52 + f * (0.8 + layer * 0.28) + layer * 80) % (width + 42)); var py = 30 + noise(i * 0.35 + layer * 10, f * 0.008 + layer * 5) * 192; fill(28 + layer * 7, 22 + layer * 5, 18 + layer * 4, 22 + noise(i, f * 0.01) * 33); noStroke(); ellipse(px, py, 40 + noise(i * 1.6) * 44); }
+  }
+  for (var x = 0; x < width; x += 18) {
+    var flH = 22 + noise(x * 0.04, f * 0.04) * 55;
+    fill(220 + noise(x, f * 0.05) * 28, 60 + noise(x * 2, f * 0.06) * 48, 10, 175);
+    beginShape(); vertex(x - 6, height * 0.70 + shk); vertex(x, height * 0.70 - flH + shk); vertex(x + 6, height * 0.70 + shk); endShape(CLOSE);
+    fill(255, 200, 30, 95); noStroke(); ellipse(x, height * 0.70 - flH * 0.3 + shk, 7, flH * 0.48);
+  }
+  fill(6, 4, 3);
+  for (var i = 0; i < 18; i++) { var sx = i * 52 - 14 + shk * 0.3; var sw = 11 + noise(i * 1.7) * 26; var sh2 = 50 + noise(i * 2.6) * 115; noStroke(); rect(sx, height * 0.70 - sh2, sw, sh2); if (noise(i * 0.88) > 0.38) rect(sx + sw * 0.20, height * 0.70 - sh2 - 34, sw * 0.24, 34); }
+  fill(18, 9, 4); rect(0, height * 0.70, width, height * 0.30);
+  noStroke(); for (var bi = 0; bi < brasas.length; bi++) { var br = brasas[bi]; br.y += br.vy; if (br.y < -5) { br.y = height + 5; br.x = random(width); } fill(235, 85 + noise(br.x, br.y) * 78, 18, br.a * map(br.y, height, 0, 1, 0.2)); ellipse(br.x + shk * 0.2, br.y, br.t); }
+  bordaEscura();
+  if (f > 22) { var a1 = min((f - 22) * 5, 195); noStroke(); fill(0, a1 * 0.66); rect(width * 0.08, height * 0.155, width * 0.84, 38, 4); fill(178, 148, 98, a1); textFont('Courier New'); textAlign(CENTER, CENTER); textStyle(NORMAL); textSize(17); text('O PREÇO DO PROGRESSO DESORDENADO...', width / 2, height * 0.186); }
+  if (f > 75) { var a2 = min((f - 75) * 5, 255); noStroke(); fill(0, a2 * 0.68); rect(width * 0.08, height * 0.324, width * 0.84, 54, 4); fill(225, 68, 42, a2); textStyle(BOLD); textSize(34); text('É A NATUREZA EM COLAPSO', width / 2, height * 0.363); textStyle(NORMAL); }
+  if (f > 128) { var a3 = min((f - 128) * 4, 180); noStroke(); fill(0, a3 * 0.60); rect(width * 0.08, height * 0.520, width * 0.84, 38, 4); fill(80, 220, 255, a3); textSize(16); text('MAS JUNTOS PODEMOS MUDAR ESSE FUTURO', width / 2, height * 0.543); }
+  textStyle(NORMAL);
+}
+
+// ─── CENA 4B — Preview dos modos de jogo ─────────────────────
+function cena4b() {
+  var f = trailerFrame - 2160;
+  var mini = floor(f / 50) % 6;
+  var fl = f % 50;
+  var flashAlpha = fl < 5 ? map(fl, 0, 5, 220, 0) : 0;
+  if (mini === 0) cenaFazendaDia(fl);
+  else if (mini === 1) cenaLavouraCrescendo(fl);
+  else if (mini === 2) cenaColheita(fl);
+  else if (mini === 3) cenaMercadoVerde(fl);
+  else if (mini === 4) cenaTempestade(fl);
+  else cenaConquista(fl);
+  noStroke(); fill(0, 145); rect(0, 0, width, 32); fill(0, 110); rect(0, height - 32, width, 32);
+  fill(92, 192, 82); textFont('Courier New'); textAlign(LEFT, CENTER); textStyle(BOLD); textSize(12); text('$ ' + (8200 + mini * 1340 + fl * 8), 14, 16);
+  var estacoes = ['LAVOURA', 'CRESCIMENTO', 'COLHEITA', 'MERCADO', 'TEMPESTADE', 'CONQUISTA'];
+  fill(210, 210, 210); textAlign(CENTER, CENTER); textSize(12); text(estacoes[mini], width / 2, 16);
+  fill(62, 132, 52); textAlign(RIGHT, CENTER); textSize(11); text('NÍVEL  3', width - 14, 16);
+  fill(255, 228, 80); textAlign(CENTER, CENTER); textStyle(BOLD); textSize(14);
+  text('AGRINHO 2026 — AGRO FORTE, FUTURO SUSTENTÁVEL', width / 2, height - 16);
+  textStyle(NORMAL);
+  if (flashAlpha > 0) { noStroke(); fill(255, flashAlpha); rect(0, 0, width, height); }
+  bordaEscura();
+}
+
+// ─── CENA 5 — Horizonte verde / encerramento ─────────────────
+function cena5() {
+  var f = trailerFrame - 2460;
+  noStroke();
+  for (var y = 0; y < height; y++) {
+    var t = y / height;
+    stroke(lerp(18, 82, t), lerp(55, 185, t), lerp(18, 52, t)); line(0, y, width, y);
+  }
+  desenharSol(width / 2, height * 0.30, 55 + sin(f * 0.02) * 8);
+  for (var i = 0; i < nuvens.length; i++) { var n = nuvens[i]; n.x -= n.vel * 0.3; if (n.x < -n.w) n.x = width + n.w; desenhaNuvem(n.x, n.y, n.w, 150, false); }
+  fill(22, 80, 28); beginShape(); vertex(0, height);
+  for (var x = 0; x <= width; x += 6) vertex(x, height * 0.65 + noise(x * 0.008, f * 0.002) * height * 0.06);
+  vertex(width, height); endShape(CLOSE);
+  fill(32, 110, 36); beginShape(); vertex(0, height);
+  for (var x = 0; x <= width; x += 5) vertex(x, height * 0.72 + noise(x * 0.01, f * 0.002 + 10) * height * 0.05);
+  vertex(width, height); endShape(CLOSE);
+  noStroke();
+  for (var i = 0; i < 40; i++) {
+    var px = noise(i * 3.1, f * 0.02) * width; var py = noise(i * 2.5, f * 0.015) * height;
+    var cols = [[255, 220, 60], [80, 255, 120], [60, 180, 255]][i % 3];
+    fill(cols[0], cols[1], cols[2], 100 + sin(f * 0.15 + i) * 70);
+    ellipse(px, py, 3 + noise(i) * 6);
+  }
+  bordaEscura();
+  if (f > 40) {
+    var a1 = min((f - 40) * 4, 255);
+    noStroke(); fill(0, a1 * 0.75); rect(width * 0.08, height * 0.12, width * 0.84, 110, 10);
+    fill(255, 240, 100, a1); textFont('Georgia'); textAlign(CENTER, CENTER); textStyle(BOLD); textSize(38);
+    text('AGRINHO 2026', width / 2, height * 0.24);
+    fill(180, 255, 140, a1); textSize(18); textStyle(NORMAL); textFont('Courier New');
+    text('Agro forte, futuro sustentável', width / 2, height * 0.34);
+    fill(255, 255, 255, a1 * 0.85); textSize(13);
+    text('Equilíbrio entre produção e meio ambiente', width / 2, height * 0.41);
+  }
+  if (f > 200) {
+    var a2 = min((f - 200) * 4, 200);
+    fill(80, 255, 80, a2); textFont('Courier New'); textSize(16); textStyle(BOLD);
+    text('[ PRESSIONE QUALQUER TECLA ]', width / 2, height * 0.85); textStyle(NORMAL);
+  }
+}
+
+// Mini-cenas internas da cena 4b
+function cenaFazendaDia(f) { for (var y = 0; y < height; y++) { stroke(lerp(55, 38, y / height), lerp(128, 148, y / height), lerp(22, 38, y / height)); line(0, y, width, y); } noStroke(); desenharSol(width * 0.80, height * 0.20, 40); fill(28, 80, 22); beginShape(); vertex(0, height); for (var x = 0; x <= width; x += 8) vertex(x, height * 0.62 + noise(x * 0.008 + f * 0.01) * 40); vertex(width, height); endShape(CLOSE); }
+function cenaLavouraCrescendo(f) { for (var y = 0; y < height; y++) { stroke(lerp(65, 28, y / height), lerp(145, 88, y / height), lerp(215, 155, y / height)); line(0, y, width, y); } noStroke(); for (var x = 0; x < width; x += 22) { var h = 40 + noise(x * 0.05, f * 0.02) * 60; fill(28 + noise(x) * 20, 120 + noise(x * 2) * 40, 22); rect(x, height - h, 14, h, 4, 4, 0, 0); fill(82, 182, 48, 180); ellipse(x + 7, height - h, 20, h * 0.6); } }
+function cenaColheita(f) { for (var y = 0; y < height; y++) { stroke(lerp(168, 78, y / height), lerp(120, 68, y / height), lerp(28, 18, y / height)); line(0, y, width, y); } noStroke(); fill(185, 142, 22); beginShape(); vertex(0, height); for (var x = 0; x <= width; x += 6) vertex(x, height * 0.55 + noise(x * 0.01, f * 0.015) * 55); vertex(width, height); endShape(CLOSE); fill(200, 162, 28); for (var i = 0; i < 20; i++) { ellipse(noise(i * 3) * width, noise(i * 2) * height * 0.6, 18 + noise(i * 1.5) * 22, 12 + noise(i * 2) * 14); } desenhaTrator(width * 0.5 + sin(f * 0.06) * 80, height * 0.72, 0.7); }
+function cenaMercadoVerde(f) { for (var y = 0; y < height; y++) { stroke(lerp(8, 22, y / height), lerp(12, 35, y / height), lerp(8, 18, y / height)); line(0, y, width, y); } noStroke(); for (var i = 0; i < 8; i++) { fill(38 + i * 6, 90 + i * 8, 28 + i * 4, 180); rect(i * 105 - 5, height * 0.45, 80 + noise(i) * 40, height * 0.55, 4, 4, 0, 0); } fill(120, 220, 80); textFont('Courier New'); textAlign(CENTER, CENTER); textStyle(BOLD); textSize(22); text('MERCADO VERDE', width / 2, height * 0.25); textStyle(NORMAL); fill(200, 255, 160); textSize(14); text('Certificação Sustentável', width / 2, height * 0.35); }
+function cenaTempestade(f) { for (var y = 0; y < height; y++) { stroke(lerp(8, 22, y / height), lerp(8, 22, y / height), lerp(12, 30, y / height)); line(0, y, width, y); } noStroke(); for (var i = 0; i < stormParts.length; i++) { var p = stormParts[i]; p.y += p.spd; if (p.y > height) { p.y = -p.len; p.x = random(width); } stroke(200, 220, 255, p.a); strokeWeight(1); line(p.x, p.y, p.x - 4, p.y + p.len); } if (random() < 0.02) { noStroke(); fill(255, 255, 255, 200); rect(0, 0, width, height); } fill(28, 80, 22); beginShape(); vertex(0, height); for (var x = 0; x <= width; x += 8) vertex(x, height * 0.68 + noise(x * 0.01, f * 0.02) * 30 + sin(f * 0.1) * 8); vertex(width, height); endShape(CLOSE); }
+function cenaConquista(f) { for (var y = 0; y < height; y++) { stroke(lerp(18, 55, y / height), lerp(55, 130, y / height), lerp(18, 48, y / height)); line(0, y, width, y); } noStroke(); desenharSol(width / 2, height * 0.20, 50 + sin(f * 0.08) * 10); for (var i = 0; i < 30; i++) { var px = noise(i * 3.1, f * 0.03) * width; var py = noise(i * 2.5, f * 0.025) * height; var cs2 = [[255, 220, 60], [80, 255, 120], [60, 180, 255]][i % 3]; fill(cs2[0], cs2[1], cs2[2], 120 + sin(f * 0.15 + i) * 80); ellipse(px, py, 4 + noise(i) * 8); } noStroke(); fill(0, 160); rect(width / 2 - 240, height * 0.72, 480, 60, 8); fill(120, 255, 120); textFont('Courier New'); textAlign(CENTER, CENTER); textStyle(BOLD); textSize(22); text('AGRO FORTE, FUTURO SUSTENTÁVEL!', width / 2, height * 0.756); textStyle(NORMAL); }
+
+// ═════════════════════════════════════════════════════════════
+// CAMPANHA
+// ═════════════════════════════════════════════════════════════
+function executarCampanha() {
+  switch (campaignState) {
+    case 'levelSelect': desenharSelecionarFase(); break;
+    case 'preCutscene': executarCutscene(); break;
+    case 'gameplay': executarGameplay(); break;
+    case 'pause': desenharPause(); break;
+    case 'win': desenharWin(); break;
+    case 'ending': executarEnding(); break;
+  }
+}
+function executarGameplay() {
+  atualizarPlayer2D();
+  atualizarNPCs2D();
+  if (phaseTimer > 0) phaseTimer--;
+  if (phaseTimer === 0 && !phaseWin) {
+    phaseWin = true;
+    if (currentPhase < 5) phasesUnlocked[currentPhase + 1] = true;
+    saveProgress();
+  }
+  if (phaseWin) { campaignState = 'win'; return; }
+  renderizarCena2D();
+  desenharBracos2D();
+  desenharHUD2D();
+  desenharMiniMapa();
+  if (dialogActive) desenharDialogo();
+  if (pickupAnim > 0) { desenharPickupFx(); pickupAnim--; }
+}
+function desenharSelecionarFase() {
+  for (var y = 0; y < height; y++) { var t = y / height; stroke(lerp(12, 28, t), lerp(35, 72, t), lerp(12, 28, t)); line(0, y, width, y); }
+  noStroke(); desenharSol(width * 0.82, 60, 38);
+  noStroke(); fill(0, 200); rect(0, 0, width, 52);
+  fill(180, 255, 140); textFont('Courier New'); textAlign(CENTER, CENTER); textStyle(BOLD); textSize(18);
+  text('CAMPANHA — SELECIONE A FASE', width / 2, 26); textStyle(NORMAL);
+  var cols = 3, bw = 238, bh = 105, gx = (width - cols * bw - (cols - 1) * 14) / 2, gy = 62;
+  for (var i = 0; i < 6; i++) {
+    var col = i % cols, row = floor(i / cols);
+    var bx = gx + col * (bw + 14), by = gy + row * (bh + 12);
+    var unlocked = phasesUnlocked[i];
+    var pd = PHASE_DATA[i];
+    noStroke();
+    fill(unlocked ? color(18, 55, 14, 210) : color(10, 22, 10, 180));
+    if (unlocked && mouseX > bx && mouseX < bx + bw && mouseY > by && mouseY < by + bh) {
+      fill(30, 85, 22, 240); stroke(100, 220, 80); strokeWeight(2);
+    } else if (unlocked) { stroke(50, 130, 40, 160); strokeWeight(1); }
+    else { stroke(35, 35, 35, 100); strokeWeight(1); }
+    rect(bx, by, bw, bh, 8); noStroke();
+    fill(pd.skyTop[0], pd.skyTop[1], pd.skyTop[2]); rect(bx + 2, by + 2, bw - 4, 35, 6, 6, 0, 0);
+    fill(unlocked ? color(220, 255, 165) : color(80, 90, 70));
+    textFont('Courier New'); textStyle(BOLD); textSize(13); textAlign(LEFT, CENTER);
+    text(pd.name, bx + 10, by + 46);
+    textStyle(NORMAL); fill(unlocked ? color(160, 220, 110, 200) : color(60, 70, 55, 150)); textSize(10);
+    text(pd.subtitle, bx + 10, by + 62);
+    fill(unlocked ? color(100, 200, 80, 180) : color(50, 60, 50, 120)); textSize(9);
+    text('Ferramenta: ' + pd.tool, bx + 10, by + 78);
+    if (unlocked) { fill(80, 180, 60, 180); text('Objetivos: ' + pd.objTotal + (pd.hasTimer ? ' | TIMER' : ''), bx + 10, by + 92); }
+    if (!unlocked) { fill(80, 80, 60, 180); textSize(18); textAlign(CENTER, CENTER); text('🔒', bx + bw - 25, by + bh / 2); }
+  }
+  noStroke(); fill(0, 160); rect(10, height - 38, 100, 28, 5);
+  fill(160, 220, 120); textFont('Courier New'); textAlign(CENTER, CENTER); textSize(10);
+  text('[ESC] VOLTAR', 60, height - 24);
+}
+
+function iniciarFase(idx) {
+  currentPhase = idx;
+  var sp = SPAWNS[idx];
+  player.x = sp[0]; player.y = sp[1]; player.angle = sp[2]; player.pitch = 0;
+  player.stamina = 100; player.health = 100; player.bobTime = 0;
+  player.moving = false; player.running = false; player.crouching = false;
+  var pd = PHASE_DATA[idx];
+  objTotal = pd.objTotal; objDone = 0;
+  phaseWin = false;
+  phaseTimer = pd.hasTimer ? pd.timerSec * 60 : -1;
+  phaseTimerMax = phaseTimer;
+  dialogActive = false; dialogNPC = null; dialogLine = 0; interactCool = 0; pickupAnim = 0;
+  zBuf = new Float32Array(width);
+  windParts = []; for (var i = 0; i < 70; i++) windParts.push({ x: random(width), y: random(height), speed: random(2, 8), alpha: random(20, 90), len: random(15, 55), curveAmp: random(1, 4), t: random(TWO_PI) });
+  activeNPCs = [];
+  var npcs = NPC_DATA[idx];
+  for (var i = 0; i < npcs.length; i++) activeNPCs.push({ charIdx: npcs[i].c, x: npcs[i].x, y: npcs[i].y, dialogSet: npcs[i].d, walkAngle: random(TWO_PI), walkTimer: 0, talking: false });
+  spots = [];
+  var map2 = MAPS[idx];
+  var available = [];
+  for (var gy2 = 1; gy2 < MAPSIZE - 1; gy2++) for (var gx = 1; gx < MAPSIZE - 1; gx++) if (map2[gy2][gx] === 0 || map2[gy2][gx] === 4) available.push({ x: gx + 0.5, y: gy2 + 0.5 });
+  for (var i = available.length - 1; i > 0; i--) { var j = floor(random(i + 1)); var tmp = available[i]; available[i] = available[j]; available[j] = tmp; }
+  for (var i = 0; i < min(objTotal, available.length); i++) spots.push({ x: available[i].x, y: available[i].y, done: false });
+  initGameAudio();
+  csIdx = 0; csFrame = 0;
+  campaignState = 'preCutscene';
+}
+
+function avancarCutscene() {
+  var sc = CUTSCENE_DATA[currentPhase];
+  csIdx++;
+  csFrame = 0;
+  if (csIdx >= sc.length) {
+    campaignState = 'gameplay';
+    if (cnvElt && cnvElt.requestPointerLock) cnvElt.requestPointerLock();
+  }
+}
+
+function executarCutscene() {
+  csFrame++;
+  var sc = CUTSCENE_DATA[currentPhase];
+  if (csIdx >= sc.length) { campaignState = 'gameplay'; return; }
+  var cena2 = sc[csIdx];
+  var dur = cena2[2];
+  var fadeAl = csFrame < 40 ? map(csFrame, 0, 40, 0, 255) : csFrame > dur - 40 ? map(csFrame, dur - 40, dur, 255, 0) : 255;
+  desenharCutsceneBg(currentPhase, fadeAl);
+  var panH = 140;
+  noStroke(); fill(0, fadeAl * 0.9); rect(0, height - panH, width, panH);
+  stroke(60, 160, 50, fadeAl * 0.5); strokeWeight(1); line(0, height - panH, width, height - panH); noStroke();
+  var key = cena2[0];
+  desenharRetratoCompleto(key, 55, height - panH / 2, fadeAl);
+  var ni = getNomeInfo(key);
+  fill(ni.r, ni.g, ni.b, fadeAl); textFont('Courier New'); textStyle(BOLD); textSize(12); textAlign(LEFT, CENTER);
+  text(ni.nome, 105, height - panH + 18);
+  var totalChars = floor(map(csFrame, 0, min(dur, 120), 0, cena2[1].length, true));
+  var texto = cena2[1].substring(0, totalChars);
+  textStyle(NORMAL); fill(235, 228, 212, fadeAl); textSize(13); textAlign(LEFT, TOP);
+  var palavras = texto.split(' '); var linha = ''; var linhas = [];
+  for (var i = 0; i < palavras.length; i++) { var te = linha + (linha === '' ? '' : ' ') + palavras[i]; if (textWidth(te) > width - 118) { linhas.push(linha); linha = palavras[i]; } else linha = te; } linhas.push(linha);
+  for (var i = 0; i < min(linhas.length, 4); i++) text(linhas[i], 105, height - panH + 36 + i * 22);
+  fill(80, 180, 60, fadeAl); textSize(9); textAlign(RIGHT, BOTTOM); textStyle(NORMAL);
+  text('[ESPAÇO/CLIQUE] ' + (csIdx + 1) + '/' + sc.length, width - 12, height - 8);
+  noStroke(); fill(30, 80, 25); rect(0, height - 3, width, 3);
+  fill(80, 200, 60); rect(0, height - 3, width * (csIdx / sc.length), 3);
+  if (csFrame >= dur) avancarCutscene();
+}
+
+function desenharCutsceneBg(phaseIdx, alpha) {
+  var pd = PHASE_DATA[phaseIdx];
+  var t = frameCount * 0.001;
+  for (var y = 0; y < height * 0.55; y++) {
+    var yT = y / (height * 0.55); stroke(lerp(pd.skyTop[0], pd.skyBot[0], yT), lerp(pd.skyTop[1], pd.skyBot[1], yT), lerp(pd.skyTop[2], pd.skyBot[2], yT)); line(0, y, width, y);
+  }
+  if (!pd.night) { noStroke(); desenharSol(width * 0.78, height * 0.15, 40); }
+  noStroke();
+  for (var y = int(height * 0.55); y < height; y++) {
+    var yT = (y - height * 0.55) / (height * 0.45);
+    stroke(lerp(pd.floorTop[0], pd.floorBot[0], yT), lerp(pd.floorTop[1], pd.floorBot[1], yT), lerp(pd.floorTop[2], pd.floorBot[2], yT)); line(0, y, width, y);
+  }
+  noStroke(); fill(pd.wallR * 0.3, pd.wallG * 0.3, pd.wallB * 0.3, 120);
+  beginShape(); vertex(0, height);
+  for (var x = 0; x <= width; x += 8) vertex(x, height * 0.58 + noise(x * 0.01 + t) * height * 0.08);
+  vertex(width, height); endShape(CLOSE);
+  bordaEscura();
+}
+
+function getNomeInfo(key) {
+  var nomes = {
+    'narrador': { nome: 'NARRADOR', r: 200, g: 200, b: 180 },
+    'juca': { nome: 'SEU JUCA', r: 220, g: 80, b: 80 },
+    'marina': { nome: 'MARINA', r: 80, g: 200, b: 100 },
+    'pedro': { nome: 'PEDRO', r: 180, g: 180, b: 220 },
+    'conceicao': { nome: 'D. CONCEIÇÃO', r: 240, g: 195, b: 60 },
+    'tonho': { nome: 'TONHO', r: 140, g: 140, b: 155 },
+    'biu': { nome: 'BIU', r: 80, g: 180, b: 80 },
+    'lena': { nome: 'LENA', r: 255, g: 255, b: 180 },
+    'costa': { nome: 'DR. COSTA', r: 220, g: 220, b: 240 },
+    'ana': { nome: 'ANA', r: 200, g: 100, b: 220 },
+    'clara': { nome: 'PROF. CLARA', r: 100, g: 160, b: 240 },
+    'tico': { nome: '[TICO]', r: 120, g: 240, b: 120 }
   };
+  return nomes[key] || { nome: key.toUpperCase(), r: 200, g: 200, b: 200 };
+}
 
-  var ownedSeeds = {wheat:10, corn:5, soy:5, coffee:2, cotton:2};
+function charKeyToIdx(key) {
+  var m = { juca: 0, marina: 1, pedro: 2, conceicao: 3, tonho: 4, biu: 5, lena: 6, costa: 7, ana: 8, clara: 9 };
+  return m[key] != null ? m[key] : -1;
+}
 
-  var ORDERS_POOL = [
-    {crop:'wheat', qty:5,  reward:200, label:'5 sacas de Trigo'},
-    {crop:'corn',  qty:3,  reward:250, label:'3 sacas de Milho'},
-    {crop:'soy',   qty:4,  reward:220, label:'4 sacas de Soja'},
-    {crop:'coffee',qty:2,  reward:320, label:'2 sacas de Café'},
-    {crop:'cotton',qty:3,  reward:300, label:'3 sacas de Algodão'}
+function desenharRetratoCompleto(key, cx, cy, alpha) {
+  var idx = charKeyToIdx(key);
+  if (idx < 0) {
+    noStroke(); fill(40, 40, 40, alpha * 0.8); ellipse(cx, cy, 64, 72);
+    fill(180, 180, 160, alpha); textFont('Courier New'); textSize(10); textAlign(CENTER, CENTER); text('★', cx, cy);
+    return;
+  }
+  var ch = CHARS[idx];
+  var w2 = 52, h2 = 68;
+  noStroke(); fill(0, alpha * 0.7); rect(cx - w2 / 2 - 3, cy - h2 / 2 - 3, w2 + 6, h2 + 6, 6);
+  fill(30, 40, 28, alpha * 0.9); rect(cx - w2 / 2, cy - h2 / 2, w2, h2, 4);
+  stroke(80, 160, 60, alpha * 0.5); strokeWeight(1); noFill(); rect(cx - w2 / 2, cy - h2 / 2, w2, h2, 4); noStroke();
+  fill(ch.skinR, ch.skinG, ch.skinB, alpha); ellipse(cx, cy - 12, 22, 24);
+  fill(ch.hairR, ch.hairG, ch.hairB, alpha);
+  if (ch.hat) { fill(ch.shirtR * 0.6, ch.shirtG * 0.6, ch.shirtB * 0.6, alpha); rect(cx - 13, cy - 26, 26, 10, 3, 3, 0, 0); fill(ch.shirtR * 0.7, ch.shirtG * 0.7, ch.shirtB * 0.7, alpha); rect(cx - 10, cy - 30, 20, 6, 2); }
+  else { ellipse(cx, cy - 22, 24, 14); arc(cx - 10, cy - 18, 6, 12, PI, TWO_PI); arc(cx + 10, cy - 18, 6, 12, PI, TWO_PI); }
+  fill(30, 20, 10, alpha); ellipse(cx - 5, cy - 13, 4, 4); ellipse(cx + 5, cy - 13, 4, 4);
+  fill(255, 255, 255, alpha * 0.8); ellipse(cx - 4, cy - 14, 2, 2); ellipse(cx + 6, cy - 14, 2, 2);
+  if (ch.coat) { fill(ch.shirtR, ch.shirtG, ch.shirtB, alpha); rect(cx - 13, cy, 26, 22, 2); fill(20, 20, 30, alpha * 0.7); rect(cx - 2, cy, 4, 22); }
+  else { fill(ch.shirtR, ch.shirtG, ch.shirtB, alpha); rect(cx - 12, cy, 24, 20, 2); }
+  fill(ch.skinR, ch.skinG, ch.skinB, alpha); rect(cx - 18, cy + 1, 8, 16, 3); rect(cx + 10, cy + 1, 8, 16, 3);
+  fill(ch.pantR, ch.pantG, ch.pantB, alpha); rect(cx - 12, cy + 20, 10, 18, 2); rect(cx + 2, cy + 20, 10, 18, 2);
+}
+
+// ═════════════════════════════════════════════════════════════
+// GAMEPLAY — CAMPANHA
+// ═════════════════════════════════════════════════════════════
+// ============================================================
+// FUNÇÕES 2D QUE ESTAVAM FALTANDO
+// ============================================================
+
+function verificarInteracao2D() {
+  // Verifica NPCs
+  for (var i = 0; i < activeNPCs.length; i++) {
+    var npc = activeNPCs[i];
+    if (dist(player.x, player.y, npc.x, npc.y) < 2.4) {
+      dialogActive = true;
+      dialogNPC = npc;
+      dialogLine = 0;
+      npc.talking = true;
+      playDialog();
+      return;
+    }
+  }
+  // Verifica objetivos (spots)
+  for (var i = 0; i < spots.length; i++) {
+    var sp = spots[i];
+    if (!sp.done && dist(player.x, player.y, sp.x, sp.y) < 1.8) {
+      sp.done = true;
+      objDone++;
+      pickupAnim = 45;
+      playPickup();
+      if (objDone >= objTotal) {
+        phaseWin = true;
+        if (currentPhase < 5) phasesUnlocked[currentPhase + 1] = true;
+        saveProgress();
+      }
+      return;
+    }
+  }
+}
+
+function atualizarNPCs2D() {
+  for (var i = 0; i < activeNPCs.length; i++) {
+    var npc = activeNPCs[i];
+    npc.walkTimer++;
+    if (npc.walkTimer > 80 && !npc.talking) {
+      npc.walkAngle += random(-0.2, 0.2);
+      var dx = cos(npc.walkAngle) * 0.03;
+      var dy = sin(npc.walkAngle) * 0.03;
+      var nx = npc.x + dx;
+      var ny = npc.y + dy;
+      var map2 = MAPS[currentPhase];
+      var tileX = floor(nx);
+      var tileY = floor(ny);
+      if (nx > 1 && nx < MAPSIZE-1 && ny > 1 && ny < MAPSIZE-1 && map2[tileY][tileX] !== 1) {
+        npc.x = nx;
+        npc.y = ny;
+      } else {
+        npc.walkAngle += PI; // inverte direção
+      }
+    }
+    if (npc.walkTimer > 180) npc.walkTimer = 0;
+  }
+}
+
+// Função distância (se não existir)
+if (typeof dist === 'undefined') {
+  function dist(x1, y1, x2, y2) {
+    return sqrt((x1 - x2) * (x1 - x2) + (y1 - y2) * (y1 - y2));
+  }
+}
+
+function atualizarPlayer2D() {
+  if (dialogActive) return;
+  var map2 = MAPS[currentPhase];
+  var spd = 0.12;
+  if (keyIsDown(SHIFT)) spd = 0.2;
+  if (keyIsDown(CONTROL)) spd = 0.06;
+  player.running = keyIsDown(SHIFT);
+  player.crouching = keyIsDown(CONTROL);
+  if (player.running) {
+    player.stamina = max(0, player.stamina - 0.28);
+    if (player.stamina <= 0) spd = 0.08;
+  } else player.stamina = min(100, player.stamina + 0.18);
+
+  var dx = 0, dy = 0;
+  if (keyIsDown(87) || keyIsDown(UP_ARROW)) dy -= spd;   // W
+  if (keyIsDown(83) || keyIsDown(DOWN_ARROW)) dy += spd; // S
+  if (keyIsDown(65) || keyIsDown(LEFT_ARROW)) dx -= spd; // A
+  if (keyIsDown(68) || keyIsDown(RIGHT_ARROW)) dx += spd; // D
+
+  // Atualiza ângulo visual (opcional)
+  if (dx !== 0 || dy !== 0) {
+    player.angle = atan2(dy, dx);
+    player.moving = true;
+  } else {
+    player.moving = false;
+  }
+  var nx = player.x + dx, ny = player.y + dy, r = 0.35;
+  function isWalkable(x, y) {
+    var x1 = floor(x - r), x2 = floor(x + r);
+    var y1 = floor(y - r), y2 = floor(y + r);
+    for (var iy = y1; iy <= y2; iy++) {
+      for (var ix = x1; ix <= x2; ix++) {
+        if (ix >= 0 && ix < MAPSIZE && iy >= 0 && iy < MAPSIZE && map2[iy][ix] === 1) return false;
+      }
+    }
+
+function verificarInteracao2D() {
+  // Interação com NPCs
+  for (var i = 0; i < activeNPCs.length; i++) {
+    var npc = activeNPCs[i];
+    if (dist(player.x, player.y, npc.x, npc.y) < 2.4) {
+      dialogActive = true;
+      dialogNPC = npc;
+      dialogLine = 0;
+      npc.talking = true;
+      playDialog();
+      return;
+    }
+  }
+  // Interação com objetivos
+  for (var i = 0; i < spots.length; i++) {
+    var sp = spots[i];
+    if (!sp.done && dist(player.x, player.y, sp.x, sp.y) < 1.8) {
+      sp.done = true;
+      objDone++;
+      pickupAnim = 45;
+      playPickup();
+      if (objDone >= objTotal) {
+        phaseWin = true;
+        if (currentPhase < 5) phasesUnlocked[currentPhase + 1] = true;
+        saveProgress();
+      }
+      return;
+    }
+  }
+}
+    return true;
+  }
+  if (isWalkable(nx, player.y)) player.x = nx;
+  if (isWalkable(player.x, ny)) player.y = ny;
+
+  if (pointerLocked) {
+    player.angle += nativeMovX * 0.005;
+    nativeMovX = 0; nativeMovY = 0;
+  }
+
+if (keyIsDown(69) && !dialogActive && interactCool <= 0) {
+  verificarInteracao2D();
+  interactCool = 22;
+}
+  if (interactCool > 0) interactCool--;
+
+  if (player.moving) {
+    stepTimer++;
+    var rate = player.running ? 18 : 28;
+    if (stepTimer % rate === 0) playStep();
+  }
+}
+
+function saveProgress() { try { localStorage.setItem('agrinho2026_v8', JSON.stringify(phasesUnlocked)); } catch (e) { } }
+
+// ═════════════════════════════════════════════════════════════
+// RAYCASTING ENGINE MELHORADO
+// ═════════════════════════════════════════════════════════════
+// ── NOVA RENDERIZAÇÃO 2D ───────────────────────────────────
+function renderizarCena2D() {
+  var map2 = MAPS[currentPhase];
+  cameraX2 = player.x * TAMANHO_CELULA - width/2 + TAMANHO_CELULA/2;
+  cameraY2 = player.y * TAMANHO_CELULA - height/2 + TAMANHO_CELULA/2;
+  cameraX2 = constrain(cameraX2, 0, MAPSIZE * TAMANHO_CELULA - width);
+  cameraY2 = constrain(cameraY2, 0, MAPSIZE * TAMANHO_CELULA - height);
+  push();
+  translate(-cameraX2, -cameraY2);
+  for (var y = 0; y < MAPSIZE; y++) {
+    for (var x = 0; x < MAPSIZE; x++) {
+      var tile = map2[y][x];
+      var xp = x * TAMANHO_CELULA;
+      var yp = y * TAMANHO_CELULA;
+      if (tile === 1) { // parede
+        fill(101, 67, 33); rect(xp, yp, TAMANHO_CELULA, TAMANHO_CELULA);
+        fill(139, 90, 43); rect(xp + 4, yp + 4, TAMANHO_CELULA - 8, TAMANHO_CELULA - 8);
+      } else if (tile === 2) { // árvore
+        fill(101, 67, 33); rect(xp + 10, yp + 14, 8, 14);
+        fill(34, 139, 34); ellipse(xp + 14, yp + 10, 18, 18);
+      } else if (tile === 3) { // celeiro
+        fill(160, 80, 40); rect(xp, yp, TAMANHO_CELULA, TAMANHO_CELULA);
+        fill(200, 120, 60); rect(xp + 4, yp + 4, TAMANHO_CELULA - 8, TAMANHO_CELULA - 8);
+      } else if (tile === 4) { // milho
+        fill(80, 140, 40); rect(xp + 12, yp + 14, 4, 14);
+        fill(60, 120, 35); ellipse(xp + 14, yp + 10, 10, 12);
+      } else if (tile === 5) { // pedra
+        fill(120, 110, 100); ellipse(xp + 14, yp + 18, 18, 12);
+      } else { // chão
+        var cor = 90 + (x * 3 + y * 2) % 40;
+        fill(cor, cor - 20, cor - 50); rect(xp, yp, TAMANHO_CELULA, TAMANHO_CELULA);
+        fill(70, 50, 30, 80); ellipse(xp + 14, yp + 20, 10, 6);
+      }
+    }
+  }
+  // Spots (objetivos)
+  for (var i = 0; i < spots.length; i++) {
+    if (!spots[i].done) {
+      var xp = spots[i].x * TAMANHO_CELULA;
+      var yp = spots[i].y * TAMANHO_CELULA;
+      var pulse = 150 + sin(frameCount * 0.1) * 105;
+      fill(255, 100, 100, pulse); ellipse(xp + 14, yp + 14, 24, 24);
+      fill(255, 50, 50); ellipse(xp + 14, yp + 14, 16, 16);
+      fill(255); textSize(16); text('⭐', xp + 14, yp + 14);
+    }
+  }
+  // NPCs
+  for (var i = 0; i < activeNPCs.length; i++) {
+    var npc = activeNPCs[i];
+    var ch = CHARS[npc.charIdx];
+    var xp = npc.x * TAMANHO_CELULA;
+    var yp = npc.y * TAMANHO_CELULA;
+    fill(ch.shirtR, ch.shirtG, ch.shirtB); rect(xp + 5, yp + 10, 18, 18, 3);
+    fill(ch.skinR, ch.skinG, ch.skinB); ellipse(xp + 14, yp + 8, 14, 14);
+    if (ch.hat) { fill(ch.shirtR * 0.6, ch.shirtG * 0.6, ch.shirtB * 0.6); rect(xp + 7, yp + 2, 14, 5, 2); }
+    fill(0); ellipse(xp + 10, yp + 7, 2, 2); ellipse(xp + 18, yp + 7, 2, 2);
+    fill(255, 255, 200); textSize(7); text(ch.name, xp + 14, yp - 2);
+  }
+  // Jogador
+  var xp = player.x * TAMANHO_CELULA;
+  var yp = player.y * TAMANHO_CELULA;
+  fill(60, 120, 60); rect(xp + 5, yp + 10, 18, 18, 3);
+  fill(255, 200, 150); ellipse(xp + 14, yp + 8, 14, 14);
+  fill(101, 67, 33); rect(xp + 7, yp + 2, 14, 5, 2);
+  fill(0); ellipse(xp + 10, yp + 7, 2, 2); ellipse(xp + 18, yp + 7, 2, 2);
+  // Seta de direção
+  var ang = player.angle;
+  var dx = cos(ang) * 10, dy = sin(ang) * 10;
+  fill(255, 200, 100);
+  triangle(xp + 14 + dx, yp + 14 + dy,
+           xp + 14 + dx * 0.3 + 4, yp + 14 + dy * 0.3,
+           xp + 14 + dx * 0.3 - 4, yp + 14 + dy * 0.3);
+  pop();
+}
+
+// Mantém o nome antigo para compatibilidade
+function renderizarCena3D() {
+  renderizarCena2D();
+}
+
+function setPixelRGB(x, y, r, g, b) {
+  var idx = 4 * (y * width + x);
+  if (idx < 0 || idx >= pixels.length - 3) return;
+  pixels[idx] = constrain(r, 0, 255); pixels[idx + 1] = constrain(g, 0, 255); pixels[idx + 2] = constrain(b, 0, 255); pixels[idx + 3] = 255;
+}
+
+// ═════════════════════════════════════════════════════════════
+// SPRITES — NPCs pixel art animados
+// ═════════════════════════════════════════════════════════════
+function renderizarSprites() {
+  var pd = PHASE_DATA[currentPhase];
+  var H = height;
+  var bob = player.moving ? sin(player.bobTime) * 7 : 0;
+  var horizon = int(H / 2 + player.pitch + bob + (player.crouching ? 20 : 0));
+  var sprites = [];
+  for (var i = 0; i < activeNPCs.length; i++) sprites.push({ type: 'npc', x: activeNPCs[i].x, y: activeNPCs[i].y, data: activeNPCs[i], idx: i });
+  for (var i = 0; i < spots.length; i++) if (!spots[i].done) sprites.push({ type: 'spot', x: spots[i].x, y: spots[i].y, data: spots[i], idx: i });
+  sprites.sort(function (a, b) { return dist(player.x, player.y, b.x, b.y) - dist(player.x, player.y, a.x, a.y); });
+  var dirX = cos(player.angle), dirY = sin(player.angle);
+  var planeX = -dirY * 0.66, planeY = dirX * 0.66;
+  var det = planeX * dirY - planeY * dirX;
+  if (abs(det) < 0.0001) return;
+  loadPixels();
+  for (var si = 0; si < sprites.length; si++) {
+    var sp = sprites[si];
+    var sprX = sp.x - player.x, sprY = sp.y - player.y;
+    var transX = (dirY * sprX - dirX * sprY) / det;
+    var transY = (planeY * sprX - planeX * sprY) / (-det);
+    if (transY <= 0.25) continue;
+    var sprScreenX = int((width / 2) * (1 + transX / transY));
+    var sprH = min(int(H / transY), H * 2);
+    var sprW = int(sprH * 0.55);
+    var drawSY = max(0, floor(horizon - sprH / 2));
+    var drawEY = min(H - 1, floor(horizon + sprH / 2));
+    var drawSX = max(0, floor(sprScreenX - sprW / 2));
+    var drawEX = min(width - 1, floor(sprScreenX + sprW / 2));
+    var fogSpr = max(constrain(transY / pd.fogDist, 0, 1), 1 - exp(-transY * pd.fogDensity)) * 0.68;
+    var walkFrame = floor(frameCount * 0.1 + si * 2.5) % 4;
+    var ch = sp.type === 'npc' ? CHARS[sp.data.charIdx] : null;
+    for (var x = drawSX; x <= drawEX; x++) {
+      if (x < 0 || x >= width) continue;
+      if (transY >= (zBuf[x] || 999)) continue;
+      var txNPC = floor((x - (sprScreenX - sprW / 2)) / max(sprW, 1) * 12);
+      txNPC = constrain(txNPC, 0, 11);
+      for (var y = drawSY; y <= drawEY; y++) {
+        if (y < 0 || y >= H) continue;
+        var tyNPC = floor((y - int(horizon - sprH / 2)) / max(sprH, 1) * 20);
+        tyNPC = constrain(tyNPC, 0, 19);
+        var pr = -1, pg2 = -1, pb2 = -1, pa = 255;
+        if (sp.type === 'npc' && ch) {
+          var cor = getPixelNPC(ch, txNPC, tyNPC, walkFrame, si);
+          if (cor === null) continue;
+          pr = cor[0]; pg2 = cor[1]; pb2 = cor[2]; pa = cor[3];
+        } else if (sp.type === 'spot') {
+          var pulse = sin(frameCount * 0.14 + si * 2.1) * 0.5 + 0.5;
+          var inBody = (txNPC >= 3 && txNPC <= 8 && tyNPC >= 3 && tyNPC <= 14);
+          var inStem = (txNPC >= 5 && txNPC <= 6 && tyNPC >= 14 && tyNPC <= 18);
+          if (inBody) { pr = 60 + int(pulse * 160); pg2 = 200 + int(pulse * 55); pb2 = 60; }
+          else if (inStem) { pr = 50 + int(pulse * 100); pg2 = 180 + int(pulse * 50); pb2 = 50; }
+          else continue;
+          pa = 200 + int(pulse * 55);
+        }
+        if (pr < 0) continue;
+        pr = int(lerp(pr, pd.fogR, fogSpr)); pg2 = int(lerp(pg2, pd.fogG, fogSpr)); pb2 = int(lerp(pb2, pd.fogB, fogSpr));
+        var pidx = 4 * (y * width + x);
+        if (pidx < 0 || pidx >= pixels.length - 3) continue;
+        pixels[pidx] = constrain(pr, 0, 255); pixels[pidx + 1] = constrain(pg2, 0, 255);
+        pixels[pidx + 2] = constrain(pb2, 0, 255); pixels[pidx + 3] = pa;
+      }
+    }
+  }
+  updatePixels();
+  for (var si = 0; si < sprites.length; si++) {
+    var sp = sprites[si];
+    var sprX2 = sp.x - player.x, sprY2 = sp.y - player.y;
+    var transX2 = (dirY * sprX2 - dirX * sprY2) / det;
+    var transY2 = (planeY * sprX2 - planeX * sprY2) / (-det);
+    if (transY2 <= 0.25 || transY2 > 4.0) continue;
+    var scrX2 = int((width / 2) * (1 + transX2 / transY2));
+    var sH2 = min(int(height / transY2), height * 2);
+    var topY2 = max(0, floor(horizon - sH2 / 2));
+    var labelAl = map(transY2, 0.3, 3.8, 255, 0);
+    noStroke(); fill(0, labelAl * 0.72); rect(scrX2 - 62, topY2 - 34, 124, 22, 4);
+    fill(200, 255, 170, labelAl); textFont('Courier New'); textAlign(CENTER, CENTER); textStyle(BOLD); textSize(10);
+    if (sp.type === 'npc') text(CHARS[sp.data.charIdx].name + '  [E]', scrX2, topY2 - 23);
+    else text('[E] ' + PHASE_DATA[currentPhase].tool, scrX2, topY2 - 23);
+    textStyle(NORMAL);
+  }
+}
+
+function getPixelNPC(ch, tx, ty, walkFrame, si) {
+  var idleSwing = sin(frameCount * 0.06 + si * 1.2) * 0.5 + 0.5;
+  var legShiftL = 0, legShiftR = 0;
+  if (walkFrame === 1) { legShiftL = -2; legShiftR = 2; }
+  else if (walkFrame === 3) { legShiftL = 2; legShiftR = -2; }
+  if (ch.hat) {
+    if (ty === 0 && tx >= 2 && tx <= 9) return [int(ch.shirtR * 0.55), int(ch.shirtG * 0.55), int(ch.shirtB * 0.55), 255];
+    if (ty >= 1 && ty <= 2 && tx >= 3 && tx <= 8) return [int(ch.shirtR * 0.65), int(ch.shirtG * 0.65), int(ch.shirtB * 0.65), 255];
+    if (ty === 2 && (tx === 3 || tx === 8)) return [int(ch.shirtR * 0.4), int(ch.shirtG * 0.4), int(ch.shirtB * 0.4), 255];
+    if (ty === 3 && tx >= 3 && tx <= 8) return [ch.skinR, ch.skinG, ch.skinB, 255];
+  } else {
+    if (ty === 0 && tx >= 2 && tx <= 9) return [ch.hairR, ch.hairG, ch.hairB, 255];
+    if (ty === 1 && tx >= 2 && tx <= 9) {
+      if (tx === 2 || tx === 9) return [int(ch.hairR * 0.8), int(ch.hairG * 0.8), int(ch.hairB * 0.8), 255];
+      return [ch.hairR, ch.hairG, ch.hairB, 255];
+    }
+    if (ty === 2) {
+      if (tx === 2 || tx === 9) return [int(ch.hairR * 0.75), int(ch.hairG * 0.75), int(ch.hairB * 0.75), 255];
+      if (tx >= 3 && tx <= 8) return [ch.skinR, ch.skinG, ch.skinB, 255];
+    }
+    if (ty === 3 && (tx === 2 || tx === 9)) return [int(ch.hairR * 0.7), int(ch.hairG * 0.7), int(ch.hairB * 0.7), 255];
+  }
+  var headStart = ch.hat ? 3 : 3;
+  if (ty >= headStart && ty <= 7) {
+    if (tx >= 3 && tx <= 8) {
+      if (ty === headStart + 1 && (tx === 4 || tx === 7)) { return [30, 20, 10, 255]; }
+      if (ty === headStart + 1 && (tx === 4 || tx === 7)) { return [255, 255, 255, 200]; }
+      if (ty === headStart && (tx === 4 || tx === 5 || tx === 7 || tx === 6)) { return [int(ch.hairR * 0.9), int(ch.hairG * 0.9), int(ch.hairB * 0.9), 255]; }
+      if (ty === headStart + 2 && (tx === 5 || tx === 6)) return [int(ch.skinR * 0.85), int(ch.skinG * 0.82), int(ch.skinB * 0.80), 255];
+      if (ty === headStart + 3 && (tx === 4 || tx === 5 || tx === 6 || tx === 7)) return [int(ch.skinR * 0.70), int(ch.skinG * 0.55), int(ch.skinB * 0.55), 255];
+      if (tx === 3 || tx === 8) return [int(ch.skinR * 0.90), int(ch.skinG * 0.88), int(ch.skinB * 0.86), 255];
+      return [ch.skinR, ch.skinG, ch.skinB, 255];
+    }
+    return null;
+  }
+  if (ty === 8) {
+    if (tx >= 5 && tx <= 6) return [int(ch.skinR * 0.92), int(ch.skinG * 0.90), int(ch.skinB * 0.88), 255];
+    return null;
+  }
+  if (ty >= 9 && ty <= 10) {
+    if (tx >= 1 && tx <= 2) {
+      var armSwingL = ty === 10 ? int(idleSwing * 12) : 0;
+      return [int(ch.shirtR * 0.78 + armSwingL), int(ch.shirtG * 0.78), int(ch.shirtB * 0.78), 255];
+    }
+    if (tx >= 9 && tx <= 10) {
+      var armSwingR = ty === 10 ? int((1 - idleSwing) * 12) : 0;
+      return [int(ch.shirtR * 0.78 + armSwingR), int(ch.shirtG * 0.78), int(ch.shirtB * 0.78), 255];
+    }
+  }
+  if (ty === 11 && tx >= 1 && tx <= 2) return [int(ch.skinR * 0.95), int(ch.skinG * 0.92), int(ch.skinB * 0.88), 255];
+  if (ty === 11 && tx >= 9 && tx <= 10) return [int(ch.skinR * 0.95), int(ch.skinG * 0.92), int(ch.skinB * 0.88), 255];
+  if (ty >= 9 && ty <= 13) {
+    if (tx >= 3 && tx <= 8) {
+      if (ch.coat) {
+        if (tx === 3 || tx === 8) return [int(ch.shirtR * 0.85), int(ch.shirtG * 0.85), int(ch.shirtB * 0.85), 255];
+        if ((tx === 4 || tx === 7) && ty >= 11) return [int(ch.shirtR * 0.6), int(ch.shirtG * 0.6), int(ch.shirtB * 0.65), 255];
+        return [ch.shirtR, ch.shirtG, ch.shirtB, 255];
+      }
+      if (tx === 5 && (ty === 10 || ty === 12)) return [int(ch.shirtR * 0.7), int(ch.shirtG * 0.7), int(ch.shirtB * 0.7), 255];
+      if (tx === 3 || tx === 8) return [int(ch.shirtR * 0.82), int(ch.shirtG * 0.82), int(ch.shirtB * 0.82), 255];
+      return [ch.shirtR, ch.shirtG, ch.shirtB, 255];
+    }
+    return null;
+  }
+  if (ty === 14) {
+    if (tx >= 3 && tx <= 8) return [int(ch.beltR || 60), int(ch.beltG || 45), int(ch.beltB || 30), 255];
+    return null;
+  }
+  if (ty >= 15 && ty <= 19) {
+    var legTy = ty - 15;
+    if (tx >= 3 && tx <= 5) {
+      var adjustedTy = legTy + legShiftL;
+      if (adjustedTy < 0 || adjustedTy > 4) return null;
+      if (adjustedTy === 4) return [int(ch.bootR || 45), int(ch.bootG || 35), int(ch.bootB || 25), 255];
+      return [ch.pantR, ch.pantG, ch.pantB, 255];
+    }
+    if (tx >= 6 && tx <= 8) {
+      var adjustedTy2 = legTy + legShiftR;
+      if (adjustedTy2 < 0 || adjustedTy2 > 4) return null;
+      if (adjustedTy2 === 4) return [int(ch.bootR || 45), int(ch.bootG || 35), int(ch.bootB || 25), 255];
+      return [int(ch.pantR * 0.88), int(ch.pantG * 0.88), int(ch.pantB * 0.88), 255];
+    }
+    return null;
+  }
+  return null;
+}
+
+// ═════════════════════════════════════════════════════════════
+// VENTO VISUAL
+// ═════════════════════════════════════════════════════════════
+function desenharVento() {
+  var pd = PHASE_DATA[currentPhase];
+  var wStr = pd.night ? 0.5 : 0.9;
+  for (var i = 0; i < windParts.length; i++) {
+    var wp = windParts[i]; wp.t += 0.05; wp.x += wp.speed;
+    if (wp.x > width + wp.len) { wp.x = -wp.len; wp.y = random(height * 0.25, height * 0.78); }
+    var curveY = sin(wp.t) * wp.curveAmp;
+    stroke(255, 252, 220, wp.alpha * (0.5 + sin(wp.t * 0.7) * 0.5) * wStr); strokeWeight(0.6 + wp.curveAmp * 0.12);
+    line(wp.x, wp.y + curveY, wp.x - wp.len * 0.7, wp.y - curveY * 0.3);
+  }
+  noStroke();
+}
+
+// ═════════════════════════════════════════════════════════════
+// BRAÇOS / FERRAMENTA — melhorados
+// ═════════════════════════════════════════════════════════════
+function desenharBracos() {
+  var bob = player.moving ? sin(player.bobTime) * 12 : 0;
+  var bobX = player.moving ? cos(player.bobTime * 0.5) * 6 : 0;
+  var crouchShift = player.crouching ? 25 : 0;
+  var pd = PHASE_DATA[currentPhase];
+  var toolColors = [[70, 200, 90], [50, 130, 220], [215, 115, 45], [155, 150, 165], [45, 185, 115], [75, 145, 235]];
+  var tc = toolColors[currentPhase];
+  push();
+  var armBaseY = height - 90 + bob + crouchShift;
+  var armBaseX = width - 155 + bobX;
+  noStroke(); fill(0, 55); ellipse(armBaseX + 8, armBaseY + 12, 52, 22);
+  fill(68, 48, 30);
+  beginShape(); vertex(armBaseX - 20, armBaseY + 50); vertex(armBaseX + 30, armBaseY + 30); vertex(width + 10, armBaseY + 50 + bob * 0.3); vertex(width + 10, height + 10); vertex(armBaseX - 30, height + 10); endShape(CLOSE);
+  fill(68, 48, 30);
+  beginShape(); vertex(armBaseX - 18, armBaseY + 15); vertex(armBaseX + 28, armBaseY - 5); vertex(armBaseX + 35, armBaseY + 30); vertex(armBaseX - 10, armBaseY + 52); endShape(CLOSE);
+  fill(188, 143, 98); ellipse(armBaseX + 5, armBaseY + 10, 38, 30);
+  fill(182, 138, 94); for (var fi = 0; fi < 4; fi++) rect(armBaseX - 8 + fi * 8, armBaseY - 2, 6, 11, 3);
+  fill(178, 134, 90); rect(armBaseX - 14, armBaseY + 4, 10, 9, 3);
+  noStroke();
+  var toolH = 78, toolW = 16;
+  var tx2 = armBaseX - 6, ty2 = armBaseY - toolH + 8;
+  if (currentPhase === 0 || currentPhase === 1) {
+    fill(38, 44, 54); rect(tx2 - 2, ty2, toolW + 4, toolH, 4);
+    fill(tc[0], tc[1], tc[2]); rect(tx2 + 1, ty2 + 5, toolW, 22, 2);
+    fill(0, 220, 100, 185); rect(tx2 + 3, ty2 + 8, 8, 3, 1); fill(0, 180, 80, 120); rect(tx2 + 3, ty2 + 13, 6, 2, 1); fill(0, 160, 60, 100); rect(tx2 + 3, ty2 + 17, 10, 2, 1);
+    fill(55, 65, 78); rect(tx2 + 2, ty2 + 30, toolW - 2, toolH - 34, 2);
+    fill(0, 255, 100, 180 + sin(frameCount * 0.2) * 75); ellipse(tx2 + toolW - 3, ty2 + 3, 5, 5);
+    fill(255, 200, 0, 160 + sin(frameCount * 0.15) * 60); ellipse(tx2 + 3, ty2 + 3, 4, 4);
+  } else if (currentPhase === 2) {
+    fill(48, 48, 62); rect(tx2, ty2 + 18, toolW, toolH - 18, 3);
+    fill(tc[0], tc[1], tc[2]); rect(tx2 + toolW / 2 - 2, ty2, 4, 22, 2);
+    fill(255, 80, 40, 200 + sin(frameCount * 0.25) * 55); ellipse(tx2 + toolW / 2, ty2, 8, 8);
+    fill(58, 62, 78); rect(tx2 + 2, ty2 + 22, toolW - 2, 22, 2);
+    fill(255, 140, 40, 165 + sin(frameCount * 0.18) * 55); ellipse(tx2 + toolW / 2, ty2 + 33, 6, 6);
+    fill(0, 255, 180, 140 + sin(frameCount * 0.22) * 40); rect(tx2 + 3, ty2 + 38, toolW - 4, 5, 2);
+  } else if (currentPhase === 3) {
+    fill(tc[0], tc[1], tc[2]); rect(tx2 + 4, ty2, 7, toolH * 0.65, 2);
+    fill(48, 58, 68); rect(tx2 + 1, ty2 + toolH * 0.6, toolW + 2, toolH * 0.35, 4);
+    fill(180, 220, 255, 165); rect(tx2 + 3, ty2 + toolH * 0.62, toolW - 2, toolH * 0.28, 3);
+    fill(140, 200, 80, 105); rect(tx2 + 3, ty2 + toolH * 0.72, toolW - 2, toolH * 0.1, 1);
+  } else if (currentPhase === 4) {
+    fill(118, 78, 38); rect(tx2 + 6, ty2, 5, toolH * 0.7, 1);
+    fill(158, 98, 43); rect(tx2 + 2, ty2 + toolH * 0.65, toolW, toolH * 0.25, 2);
+    fill(78, 53, 23); rect(tx2 + 4, ty2 + toolH * 0.88, toolW - 4, toolH * 0.1, 1);
+    fill(tc[0], tc[1], tc[2], 200); ellipse(tx2 + toolW / 2, ty2 + toolH * 0.5, 20, 20);
+    fill(48, 118, 38, 185); ellipse(tx2 + toolW / 2, ty2 + toolH * 0.5, 11, 14);
+  } else {
+    fill(38, 40, 50); rect(tx2 - 5, ty2 + 20, toolW + 10, toolH - 20, 5);
+    fill(tc[0], tc[1], tc[2]); rect(tx2 - 4, ty2 + 25, toolW + 8, 30, 4);
+    fill(0, 180, 255, 185 + sin(frameCount * 0.18) * 50); rect(tx2 - 2, ty2 + 28, toolW + 4, 15, 3);
+    fill(48, 50, 60); rect(tx2 + 1, ty2 + 5, 3, 20, 1); rect(tx2 + toolW - 2, ty2 + 5, 3, 20, 1);
+    fill(255, 100, 80, 185); ellipse(tx2 + 2, ty2 + 5, 6, 6); fill(100, 255, 80, 185); ellipse(tx2 + toolW, ty2 + 5, 6, 6);
+  }
+  if (!pointerLocked) {
+    noStroke(); fill(0, 140); rect(width / 2 - 105, height - 50, 210, 22, 4);
+    fill(255, 200, 80, 200); textFont('Courier New'); textAlign(CENTER, CENTER); textSize(9);
+    text('CLIQUE no jogo para travar a câmera (pointer lock)', width / 2, height - 39);
+  }
+  pop();
+}
+
+// ═════════════════════════════════════════════════════════════
+// HUD
+// ═════════════════════════════════════════════════════════════
+function desenharHUD() {
+  var pd = PHASE_DATA[currentPhase];
+  noStroke(); fill(0, 195); rect(0, 0, width, 48);
+  textFont('Courier New');
+  fill(175, 248, 140); textStyle(BOLD); textSize(12); textAlign(LEFT, CENTER); text(pd.name + ' — ' + pd.subtitle, 14, 14);
+  textStyle(NORMAL); fill(135, 200, 105, 185); textSize(9); text(pd.toolTip + '  |  Setas girar câmera', 14, 30);
+  var prog = objDone / max(objTotal, 1);
+  fill(0, 100); rect(width / 2 - 85, 8, 170, 30, 4); fill(28, 100, 22, 185); rect(width / 2 - 83, 10, 164 * prog, 26, 3);
+  stroke(55, 155, 45, 145); strokeWeight(1); rect(width / 2 - 83, 10, 164, 26, 3); noStroke();
+  fill(195, 255, 165); textStyle(BOLD); textAlign(CENTER, CENTER); textSize(11);
+  text(pd.objLabel + ': ' + objDone + ' / ' + objTotal, width / 2, 23); textStyle(NORMAL);
+  if (phaseTimer > 0) {
+    var secs = ceil(phaseTimer / 60);
+    var urgent = secs < 60;
+    var pulseT = urgent ? (sin(frameCount * 0.25) * 0.5 + 0.5) : 1;
+    fill(urgent ? color(255, int(55 * pulseT), int(35 * pulseT)) : color(255, 220, 80));
+    textStyle(BOLD); textAlign(RIGHT, CENTER); textSize(14);
+    text('⏱ ' + floor(secs / 60) + ':' + (secs % 60 < 10 ? '0' : '') + (secs % 60), width - 14, 22); textStyle(NORMAL);
+  }
+  textAlign(RIGHT, CENTER); textSize(9); noStroke(); fill(0, 120); rect(width - 124, 52, 110, 13, 3);
+  fill(player.running ? color(255, 175, 0) : color(65, 195, 65)); rect(width - 122, 54, player.stamina * 1.06, 9, 2);
+  fill(195, 200, 175); text('STAMINA', width - 14, 58);
+  noStroke(); fill(0, 120); rect(width - 124, 68, 110, 10, 3);
+  fill(215, 55, 55); rect(width - 122, 70, player.health * 1.06, 6, 2);
+  fill(195, 200, 175); textSize(9); text('SAÚDE', width - 14, 75);
+  var cx2 = width / 2, cy2 = height / 2 + player.pitch;
+  var chSize = player.crouching ? 5 : 7, chGap = player.crouching ? 4 : 3;
+  stroke(255, 255, 255, 200); strokeWeight(1.5);
+  line(cx2 - chSize - chGap, cy2, cx2 - chGap, cy2); line(cx2 + chGap, cy2, cx2 + chSize + chGap, cy2);
+  line(cx2, cy2 - chSize - chGap, cx2, cy2 - chGap); line(cx2, cy2 + chGap, cx2, cy2 + chSize + chGap);
+  noStroke(); fill(255, 255, 255, 130); ellipse(cx2, cy2, 3, 3);
+  var nearObj = false;
+  for (var i = 0; i < activeNPCs.length; i++) if (dist(player.x, player.y, activeNPCs[i].x, activeNPCs[i].y) < 2.4) nearObj = true;
+  for (var i = 0; i < spots.length; i++) if (!spots[i].done && dist(player.x, player.y, spots[i].x, spots[i].y) < 1.8) nearObj = true;
+  if (nearObj) {
+    var pulseA = 180 + sin(frameCount * 0.2) * 75;
+    noStroke(); fill(0, pulseA * 0.5); rect(cx2 - 58, cy2 + 18, 116, 24, 4);
+    fill(115, 255, 115, pulseA); textFont('Courier New'); textStyle(BOLD); textSize(11); textAlign(CENTER, CENTER);
+    text('[E] ' + pd.tool, cx2, cy2 + 30); textStyle(NORMAL);
+  }
+  noStroke(); fill(0, 160); rect(0, height - 26, width, 26);
+  fill(145, 195, 115, 165); textFont('Courier New'); textAlign(LEFT, CENTER); textSize(8);
+  text('WASD mover  |  Mouse/Setas câmera  |  Shift correr  |  Ctrl agachar  |  E interagir  |  ESC pausar', 14, height - 13);
+  if (pd.night) {
+    for (var r = min(width, height) * 0.58; r > 30; r -= 4) { var v = map(r, 30, min(width, height) * 0.58, 190, 0); noFill(); stroke(0, v); strokeWeight(4); ellipse(width / 2, height / 2, r * 2, r * 2); }
+    noStroke(); fill(0, 140); rect(10, 50, 145, 18, 4);
+    fill(120, 200, 255, 185); textFont('Courier New'); textSize(9); textAlign(LEFT, CENTER); text('◉ VISÃO NOTURNA ATIVA', 18, 59);
+  }
+}
+
+// ═════════════════════════════════════════════════════════════
+// DIÁLOGO
+// ═════════════════════════════════════════════════════════════
+function desenharDialogo() {
+  if (!dialogNPC) return;
+  var dialogs = DIALOGUES[currentPhase];
+  var lines = dialogs[dialogNPC.dialogSet] || [];
+  if (dialogLine >= lines.length) { dialogActive = false; dialogNPC = null; return; }
+  var texto = lines[dialogLine];
+  noStroke(); fill(0, 220); rect(0, height - 118, width, 118);
+  stroke(65, 150, 50, 160); strokeWeight(1); line(0, height - 118, width, height - 118); noStroke();
+  var ch = CHARS[dialogNPC.charIdx];
+  desenharRetratoCompleto(['juca', 'marina', 'pedro', 'conceicao', 'tonho', 'biu', 'lena', 'costa', 'ana', 'clara'][dialogNPC.charIdx], 55, height - 62, 240);
+  fill(ch.shirtR, ch.shirtG, ch.shirtB); textStyle(BOLD); textFont('Courier New'); textSize(12); textAlign(LEFT, CENTER);
+  text(ch.name, 108, height - 106);
+  textStyle(NORMAL); fill(235, 230, 212); textSize(12.5);
+  var palavras = texto.split(' '); var linha = ''; var linhas = [];
+  for (var i = 0; i < palavras.length; i++) { var te = linha + (linha === '' ? '' : ' ') + palavras[i]; if (textWidth(te) > width - 120) { linhas.push(linha); linha = palavras[i]; } else linha = te; } linhas.push(linha);
+  for (var i = 0; i < min(linhas.length, 3); i++) text(linhas[i], 108, height - 84 + i * 22);
+  fill(135, 195, 115, 165); textSize(9); textAlign(RIGHT, BOTTOM);
+  text('[E/CLIQUE] ' + (dialogLine < lines.length - 1 ? 'Próximo' : 'Fechar') + '   (' + (dialogLine + 1) + '/' + lines.length + ')', width - 10, height - 6);
+  noStroke(); fill(48, 95, 42, 135); rect(0, height - 4, width, 4);
+  fill(75, 180, 60, 195); rect(0, height - 4, width * ((dialogLine + 1) / lines.length), 4);
+}
+
+// ═════════════════════════════════════════════════════════════
+// PICKUP FX
+// ═════════════════════════════════════════════════════════════
+function desenharPickupFx() {
+  var prog = 1 - pickupAnim / 45;
+  var alpha = map(pickupAnim, 45, 0, 255, 0);
+  var scale2 = 1 + prog * 0.5;
+  noStroke(); fill(115, 255, 115, alpha * 0.32); ellipse(width / 2, height / 2, 82 * scale2, 82 * scale2);
+  fill(195, 255, 175, alpha); textFont('Courier New'); textStyle(BOLD); textAlign(CENTER, CENTER); textSize(16);
+  text('+1 ' + PHASE_DATA[currentPhase].tool, width / 2, height / 2 - 42 - prog * 18); textStyle(NORMAL);
+  if (objDone >= objTotal && !phaseWin) { fill(255, 255, 100, alpha); textSize(20); text('FASE COMPLETA!', width / 2, height / 2 - 72 - prog * 14); }
+}
+
+function desenharMiniMapa() {
+  var map2 = MAPS[currentPhase];
+  var miniSize = 90;
+  var cellSize = miniSize / 9;
+  var offsetX = width - miniSize - 10;
+  var offsetY = 55;
+  fill(0, 180); rect(offsetX - 2, offsetY - 2, miniSize + 4, miniSize + 4, 5);
+  var startX = max(0, min(MAPSIZE - 9, floor(player.x) - 4));
+  var startY = max(0, min(MAPSIZE - 9, floor(player.y) - 4));
+  for (var i = 0; i < 9; i++) {
+    for (var j = 0; j < 9; j++) {
+      var mapX = startX + j, mapY = startY + i;
+      if (mapX < MAPSIZE && mapY < MAPSIZE) {
+        var tile = map2[mapY][mapX];
+        var cor = (tile === 1) ? color(80, 70, 50) : color(100, 80, 50);
+        fill(cor);
+        rect(offsetX + j * cellSize, offsetY + i * cellSize, cellSize, cellSize);
+      }
+    }
+  }
+  var px = offsetX + ((player.x - startX) * cellSize);
+  var py = offsetY + ((player.y - startY) * cellSize);
+  fill(255, 255, 100); ellipse(px, py, cellSize * 0.8, cellSize * 0.8);
+}
+
+function desenharBracos2D() {
+  var pd = PHASE_DATA[currentPhase];
+  fill(0, 180); rect(width - 150, height - 50, 140, 40, 8);
+  fill(255, 200, 80); textSize(11); text(pd.tool, width - 140, height - 30);
+  fill(200); textSize(9); text('[E] Interagir', width - 140, height - 18);
+  if (!pointerLocked && campaignState === 'gameplay') {
+    fill(0, 140); rect(width/2 - 105, height - 45, 210, 20, 4);
+    fill(255, 200, 80); textSize(9); text('CLIQUE para travar a câmera', width/2, height - 35);
+  }
+}
+
+function desenharHUD2D() {
+  var pd = PHASE_DATA[currentPhase];
+  fill(0, 195); rect(0, 0, width, 48);
+  fill(175, 248, 140); textSize(12); text(pd.name + ' — ' + pd.subtitle, 14, 20);
+  fill(135, 200, 105); textSize(9); text(pd.toolTip + ' | WASD mover | E interagir', 14, 35);
+  var prog = objDone / max(objTotal, 1);
+  fill(0, 100); rect(width/2 - 85, 10, 170, 28, 4);
+  fill(28, 100, 22); rect(width/2 - 83, 12, 166 * prog, 24, 3);
+  fill(195, 255, 165); textSize(11); text(pd.objLabel + ': ' + objDone + ' / ' + objTotal, width/2, 28);
+  if (phaseTimer > 0) {
+    var secs = ceil(phaseTimer / 60);
+    fill(255, 220, 80); textSize(14); text('⏱ ' + floor(secs/60) + ':' + nf(secs%60, 2), width - 14, 24);
+  }
+  // Mira simples
+  var cx = width/2, cy = height/2;
+  stroke(255, 255, 255, 200); strokeWeight(1.5);
+  line(cx - 10, cy, cx - 4, cy); line(cx + 4, cy, cx + 10, cy);
+  line(cx, cy - 10, cx, cy - 4); line(cx, cy + 4, cx, cy + 10);
+  noStroke();
+  // Stamina
+  fill(0, 120); rect(width - 124, 52, 110, 13, 3);
+  fill(player.running ? color(255, 175, 0) : color(65, 195, 65)); rect(width - 122, 54, player.stamina, 9, 2);
+  fill(195, 200, 175); textSize(9); text('STAMINA', width - 14, 58);
+  // Rodapé
+  fill(0, 160); rect(0, height - 26, width, 26);
+  fill(145, 195, 115); textSize(8); text('WASD/Setas mover | E interagir | ESC pausar', 14, height - 13);
+}
+
+// ═════════════════════════════════════════════════════════════
+// PAUSE
+// ═════════════════════════════════════════════════════════════
+function desenharPause() {
+  renderizarCena3D();
+  noStroke(); fill(0, 195); rect(0, 0, width, height);
+  textFont('Courier New'); textAlign(CENTER, CENTER); textStyle(BOLD);
+  fill(215, 255, 175); textSize(42); text('PAUSADO', width / 2, height * 0.24);
+  textStyle(NORMAL); fill(145, 195, 115, 175); textSize(12);
+  text(PHASE_DATA[currentPhase].name + ' — ' + PHASE_DATA[currentPhase].subtitle, width / 2, height * 0.35);
+  var opts = ['▶  CONTINUAR', '↺  REINICIAR FASE', '≡  SELECIONAR FASE', '✕  MENU PRINCIPAL'];
+  for (var i = 0; i < opts.length; i++) {
+    var by = height * 0.44 + i * 52;
+    var sel = pauseOpt === i;
+    noStroke(); fill(0, 80); rect(width / 2 - 145, by - 22, 290, 42, 8);
+    fill(sel ? color(35, 105, 25, 238) : color(14, 38, 12, 188)); stroke(sel ? color(95, 215, 75) : color(52, 118, 48), sel ? 210 : 115); strokeWeight(sel ? 2 : 1);
+    rect(width / 2 - 143, by - 20, 286, 38, 6); noStroke();
+    fill(sel ? color(205, 255, 160) : color(150, 205, 115)); textStyle(sel ? BOLD : NORMAL); textSize(15);
+    text(opts[i], width / 2, by); textStyle(NORMAL);
+  }
+  fill(115, 175, 95, 155); textSize(10);
+  text('↑↓ navegar  |  ENTER confirmar  |  ESC continuar', width / 2, height - 20);
+}
+
+// ═════════════════════════════════════════════════════════════
+// WIN
+// ═════════════════════════════════════════════════════════════
+function desenharWin() {
+  noStroke(); for (var y = 0; y < height; y++) { var t = map(y, 0, height, 0, 1); stroke(lerp(18, 52, t), lerp(52, 128, t), lerp(18, 46, t)); line(0, y, width, y); }
+  noStroke();
+  for (var i = 0; i < 50; i++) {
+    var px2 = noise(i * 3.1, frameCount * 0.02) * width; var py2 = noise(i * 2.5, frameCount * 0.015) * height;
+    var c2 = [[255, 220, 60], [80, 255, 120], [60, 180, 255], [255, 100, 200]][i % 4];
+    fill(c2[0], c2[1], c2[2], 130 + sin(frameCount * 0.15 + i) * 80);
+    ellipse(px2, py2, 4 + noise(i) * 7);
+  }
+  textFont('Courier New'); textAlign(CENTER, CENTER); textStyle(BOLD);
+  fill(220, 255, 160); textSize(46); text('FASE CONCLUÍDA!', width / 2, height * 0.22);
+  textStyle(NORMAL); fill(180, 235, 130); textSize(20);
+  text(PHASE_DATA[currentPhase].name + ' — ' + PHASE_DATA[currentPhase].subtitle, width / 2, height * 0.37);
+  noStroke(); fill(0, 100); rect(width / 2 - 165, height * 0.43, 330, 40, 6);
+  fill(115, 235, 95); textStyle(BOLD); textSize(14);
+  text(PHASE_DATA[currentPhase].objLabel + ': ' + objDone + ' / ' + objTotal + ' ✓', width / 2, height * 0.45); textStyle(NORMAL);
+  if (currentPhase < 5) { noStroke(); fill(0, 115); rect(width / 2 - 175, height * 0.58, 350, 34, 6); fill(75, 215, 255); textSize(13); text('🔓 ' + PHASE_DATA[currentPhase + 1].name + ' desbloqueada!', width / 2, height * 0.597); }
+  var pulseA = 200 + sin(frameCount * 0.1) * 55; noStroke();
+  if (currentPhase < 5) { fill(75, 215, 75, pulseA); textStyle(BOLD); textSize(15); text('[ESPAÇO] Próxima Fase  |  [ESC] Selecionar Fase', width / 2, height * 0.77); }
+  else { fill(255, 215, 55, pulseA); textStyle(BOLD); textSize(15); text('[ESPAÇO] Ver Encerramento', width / 2, height * 0.77); }
+  textStyle(NORMAL);
+}
+
+// ═════════════════════════════════════════════════════════════
+// ENDING
+// ═════════════════════════════════════════════════════════════
+function executarEnding() {
+  csFrame++;
+  if (csIdx >= ENDING_SCENES.length) { campaignActive = false; campaignState = 'levelSelect'; if (document.exitPointerLock) document.exitPointerLock(); return; }
+  var sc = ENDING_SCENES[csIdx];
+  var dur = sc[2];
+  var fadeAl = csFrame < 45 ? map(csFrame, 0, 45, 0, 255) : csFrame > dur - 45 ? map(csFrame, dur - 45, dur, 255, 0) : 255;
+  desenharCutsceneBg(5, fadeAl);
+  var panH = 155;
+  noStroke(); fill(0, fadeAl * 0.9); rect(0, height - panH, width, panH);
+  stroke(78, 180, 75, fadeAl * 0.5); strokeWeight(1); line(0, height - panH, width, height - panH); noStroke();
+  desenharRetratoCompleto(sc[0], 58, height - panH / 2, fadeAl);
+  var ni = getNomeInfo(sc[0]);
+  fill(ni.r, ni.g, ni.b, fadeAl); textFont('Courier New'); textStyle(BOLD); textSize(12); textAlign(LEFT, CENTER);
+  text(ni.nome, 110, height - panH + 18);
+  textStyle(NORMAL); fill(232, 225, 210, fadeAl); textSize(13); textAlign(LEFT, TOP);
+  var palavras = sc[1].split(' '); var linha = ''; var linhas = [];
+  for (var i = 0; i < palavras.length; i++) { var te = linha + (linha === '' ? '' : ' ') + palavras[i]; if (textWidth(te) > width - 128) { linhas.push(linha); linha = palavras[i]; } else linha = te; } linhas.push(linha);
+  for (var i = 0; i < min(linhas.length, 4); i++) text(linhas[i], 110, height - panH + 36 + i * 22);
+  if (csIdx >= ENDING_SCENES.length - 1 && csFrame > dur - 80) {
+    var credA = map(csFrame, dur - 80, dur, 0, 248);
+    noStroke(); fill(0, credA * 0.72); rect(width * 0.15, height * 0.22, width * 0.70, 118, 8);
+    fill(255, 235, 100, credA); textStyle(BOLD); textSize(22); textAlign(CENTER, CENTER); text('AGRINHO 2026', width / 2, height * 0.30);
+    textStyle(NORMAL); textSize(14); fill(195, 240, 160, credA); text('Agro forte, futuro sustentável', width / 2, height * 0.37);
+    fill(145, 195, 125, credA * 0.8); textSize(11);
+    text('Tema: Equilíbrio entre produção e meio ambiente', width / 2, height * 0.44);
+    fill(120, 180, 100, credA * 0.8); text('[ESC] Voltar ao menu principal', width / 2, height * 0.51);
+  }
+  noStroke(); fill(65, 155, 50, fadeAl * 0.5); rect(0, height - 4, width, 4);
+  fill(95, 195, 75, fadeAl); rect(0, height - 4, width * map(csFrame, 0, dur, 0, 1), 4);
+  if (csFrame >= dur) { csIdx++; csFrame = 0; }
+}
+
+// ═════════════════════════════════════════════════════════════
+// MODO SANDBOX
+// ═════════════════════════════════════════════════════════════
+function iniciarSandbox() {
+  sandboxActive = true;
+  sbWeather = 0; sbTool = 0; sbWeatherTimer = 0; lightningFlash = 0;
+  player.x = 12; player.y = 12; player.angle = 0; player.pitch = 0;
+  player.stamina = 100; player.health = 100; player.bobTime = 0;
+  currentPhase = 5;
+  zBuf = new Float32Array(width);
+  windParts = []; for (var i = 0; i < 70; i++) windParts.push({ x: random(width), y: random(height), speed: random(2, 8), alpha: random(20, 90), len: random(15, 55), curveAmp: random(1, 4), t: random(TWO_PI) });
+  activeNPCs = [];
+  var npcs = NPC_DATA[5];
+  for (var i = 0; i < npcs.length; i++) activeNPCs.push({ charIdx: npcs[i].c, x: npcs[i].x, y: npcs[i].y, dialogSet: npcs[i].d, walkAngle: random(TWO_PI), walkTimer: 0, talking: false });
+  spots = []; objTotal = 0; objDone = 0; phaseWin = false; phaseTimer = -1;
+  dialogActive = false; dialogNPC = null;
+  initGameAudio();
+  if (cnvElt && cnvElt.requestPointerLock) cnvElt.requestPointerLock();
+}
+
+function executarSandbox() {
+  sbWeatherTimer++;
+  var sbPD = {
+    night: sbWeather === 2 || sbWeather === 3,
+    fogDist: sbWeather === 3 ? 6 : (sbWeather === 2 ? 8 : 16),
+    fogDensity: sbWeather === 3 ? 0.15 : (sbWeather === 2 ? 0.08 : 0.05),
+    fogR: sbWeather === 3 ? 20 : (sbWeather === 2 ? 12 : 150),
+    fogG: sbWeather === 3 ? 20 : (sbWeather === 2 ? 22 : 210),
+    fogB: sbWeather === 3 ? 30 : (sbWeather === 2 ? 14 : 240),
+    skyTop: sbWeather === 0 ? [82, 205, 252] : sbWeather === 1 ? [88, 100, 115] : sbWeather === 2 ? [8, 12, 28] : [22, 22, 30],
+    skyBot: sbWeather === 0 ? [42, 165, 222] : sbWeather === 1 ? [55, 70, 85] : sbWeather === 2 ? [4, 8, 20] : [14, 14, 22],
+    floorTop: sbWeather === 0 ? [55, 148, 55] : sbWeather === 1 ? [42, 110, 42] : [32, 100, 32],
+    floorBot: sbWeather === 0 ? [32, 100, 32] : sbWeather === 1 ? [25, 78, 25] : [18, 65, 18],
+    wallR: 68, wallG: 152, wallB: 68
+  };
+  PHASE_DATA[5].night = sbPD.night;
+  PHASE_DATA[5].fogDist = sbPD.fogDist;
+  PHASE_DATA[5].fogDensity = sbPD.fogDensity;
+  PHASE_DATA[5].fogR = sbPD.fogR;
+  PHASE_DATA[5].fogG = sbPD.fogG;
+  PHASE_DATA[5].fogB = sbPD.fogB;
+  for (var ii = 0; ii < 3; ii++) { PHASE_DATA[5].skyTop[ii] = sbPD.skyTop[ii]; PHASE_DATA[5].skyBot[ii] = sbPD.skyBot[ii]; PHASE_DATA[5].floorTop[ii] = sbPD.floorTop[ii]; PHASE_DATA[5].floorBot[ii] = sbPD.floorBot[ii]; }
+  atualizarPlayer();
+  atualizarNPCs();
+  renderizarCena3D();
+  renderizarSprites();
+  desenharVento();
+  if (sbWeather === 3) {
+    stroke(180, 200, 255, 100); strokeWeight(1);
+    for (var i = 0; i < stormParts.length; i++) {
+      var p = stormParts[i]; p.y += p.spd; if (p.y > height) { p.y = -p.len; p.x = random(width); }
+      line(p.x, p.y, p.x - 3, p.y + p.len);
+    }
+    noStroke();
+    lightningFlash = max(0, lightningFlash - 3);
+    if (random() < 0.008) { lightningFlash = 255; }
+    if (lightningFlash > 0) { fill(255, 255, 255, lightningFlash * 0.3); rect(0, 0, width, height); }
+  }
+  desenharBracos();
+  hudSandbox();
+  if (dialogActive) desenharDialogo();
+}
+
+function hudSandbox() {
+  noStroke(); fill(0, 195); rect(0, 0, width, 48);
+  fill(255, 200, 80); textFont('Courier New'); textStyle(BOLD); textSize(13); textAlign(LEFT, CENTER);
+  text('SANDBOX — MODO LIVRE', 14, 14);
+  textStyle(NORMAL); fill(180, 180, 140, 180); textSize(9);
+  text('WASD mover  |  Mouse câmera  |  C = clima  |  1-6 = ferramenta  |  ESC = sair', 14, 30);
+  noStroke(); fill(0, 150); rect(width - 200, 8, 188, 30, 4);
+  var wCors = [[255, 220, 60], [160, 180, 200], [80, 120, 220], [80, 100, 180]];
+  fill(wCors[sbWeather][0], wCors[sbWeather][1], wCors[sbWeather][2]);
+  textStyle(BOLD); textSize(11); textAlign(RIGHT, CENTER);
+  text(SB_WEATHER_NAMES[sbWeather], width - 14, 23); textStyle(NORMAL);
+  noStroke(); fill(0, 150); rect(width / 2 - 85, 8, 170, 30, 4);
+  fill(120, 255, 100); textAlign(CENTER, CENTER); textStyle(BOLD); textSize(11);
+  text('TOOL: ' + ['SCANNER', 'NOTURNO', 'HACKEAR', 'COLETOR', 'PLANTIO', 'DRONE'][sbTool], width / 2, 23); textStyle(NORMAL);
+  noStroke(); fill(0, 160); rect(0, height - 30, width, 30);
+  for (var i = 0; i < 6; i++) {
+    var bx = 14 + i * 128;
+    fill(sbTool === i ? color(40, 120, 30, 230) : color(20, 50, 15, 180));
+    rect(bx, height - 26, 120, 22, 4);
+    fill(sbTool === i ? color(220, 255, 160) : color(130, 185, 100));
+    textFont('Courier New'); textSize(9); textAlign(CENTER, CENTER); textStyle(BOLD);
+    text('[' + (i + 1) + '] ' + ['SCANNER', 'NOTURNO', 'HACKEAR', 'COLETOR', 'PLANTIO', 'DRONE'][i], bx + 60, height - 15);
+  }
+  textStyle(NORMAL);
+  fill(0, 120); rect(width - 124, 52, 110, 13, 3); noStroke();
+  fill(player.running ? color(255, 175, 0) : color(65, 195, 65)); rect(width - 122, 54, player.stamina * 1.06, 9, 2);
+  fill(180, 195, 155); textFont('Courier New'); textSize(9); textAlign(RIGHT, CENTER); text('STAMINA', width - 14, 58);
+}
+
+// ═════════════════════════════════════════════════════════════
+// MODO PLANTAÇÃO — Simulador 2D top-down
+// ═════════════════════════════════════════════════════════════
+function iniciarPlantacao() {
+  plantGrid = [];
+  for (var r = 0; r < PLANT_ROWS; r++) for (var c = 0; c < PLANT_COLS; c++) plantGrid.push({ col: c, row: r, stage: 0, pH: random(4.5, 8.0), water: random(20, 80), type: 0, pestTime: 0, hasPest: false, growTimer: 0 });
+  plantResources = { agua: 100, creditos: 100, solo: 100, sementes: 30 };
+  plantTool = 0; plantMsg = ''; plantMsgTimer = 0; plantEfficiency = 0; plantWin = false;
+  plantCursor = { col: 0, row: 0 };
+}
+
+function executarPlantacao() {
+  for (var y = 0; y < height; y++) { var t = y / height; stroke(lerp(30, 18, t), lerp(90, 55, t), lerp(30, 15, t)); line(0, y, width, y); }
+  noStroke();
+  desenharSol(width - 60, 50, 28);
+  noStroke(); fill(0, 200); rect(0, 0, width, 42);
+  fill(120, 255, 100); textFont('Courier New'); textStyle(BOLD); textAlign(CENTER, CENTER); textSize(16);
+  text('PLANTAÇÃO — SIMULADOR AGRÍCOLA', width / 2, 21); textStyle(NORMAL);
+  var rY = 48;
+  var recursos = [
+    { label: '💧 ÁGUA', val: plantResources.agua, r: 60, g: 120, b: 255 },
+    { label: '🌿 CRÉDITOS', val: plantResources.creditos, r: 60, g: 200, b: 80 },
+    { label: '🌱 SOLO', val: plantResources.solo, r: 180, g: 140, b: 60 },
+    { label: '🌾 SEMENTES', val: plantResources.sementes, r: 220, g: 200, b: 80 }
   ];
-
-  var SHOP_ITEMS = [
-    {id:'wheat', name:'Sementes Trigo (5)',  cost:80,  type:'seed', seed:'wheat', qty:5},
-    {id:'corn',  name:'Sementes Milho (5)',  cost:150, type:'seed', seed:'corn',  qty:5},
-    {id:'soy',   name:'Sementes Soja (5)',   cost:120, type:'seed', seed:'soy',   qty:5},
-    {id:'coffee',name:'Mudas Café (3)',      cost:200, type:'seed', seed:'coffee',qty:3},
-    {id:'cotton',name:'Sementes Algodão (3)',cost:160, type:'seed', seed:'cotton',qty:3}
-  ];
-
-  // ---- HUD canvases temporários ----
-  var mmCanvas = null; // mini-mapa
-
-  // ============================================================
-  // INIT
-  // ============================================================
-  function init(c, opts) {
-    canvas = c;
-    opts = opts || {};
-    onMoneyFn = opts.onMoney || function(){};
-    onDayFn   = opts.onDay   || function(){};
-    _initFarmGrid();
-    _generateOrders();
-    Engine.init(canvas, {
-      onInteract: _handleInteract,
-      onBoundary: function(m){ _toast(m); },
-      quality: 'medium',
-      mouseSens: 4
-    });
-    farmMapInfo = Engine.generatePlantationMap({
-      farmGrid: farmGrid,
-      buildings: buildings,
-      hasPermit: hasPermit
-    });
-    resize();
-    window.addEventListener('resize', resize);
-    _setupKeys();
+  for (var i = 0; i < recursos.length; i++) {
+    var rx = 8 + i * (width / 4);
+    noStroke(); fill(0, 150); rect(rx, rY, width / 4 - 8, 28, 4);
+    fill(recursos[i].r, recursos[i].g, recursos[i].b); rect(rx + 2, rY + 16, max(0, (width / 4 - 12) * (recursos[i].val / 100)), 8, 2);
+    fill(200, 220, 180); textFont('Courier New'); textSize(9); textAlign(LEFT, CENTER); textStyle(BOLD);
+    text(recursos[i].label + ' ' + floor(recursos[i].val), rx + 4, rY + 8); textStyle(NORMAL);
   }
-
-  function resize() {
-    W = canvas.offsetWidth  || 900;
-    H = canvas.offsetHeight || 600;
-    if (mmCanvas) { mmCanvas.width=120; mmCanvas.height=120; }
-    Engine.resize && Engine.resize();
+  var gridOffX = 40, gridOffY = 90, cellW = 68, cellH = 52;
+  for (var i = 0; i < plantGrid.length; i++) {
+    var cell = plantGrid[i];
+    var cx2 = gridOffX + cell.col * cellW, cy2 = gridOffY + cell.row * cellH;
+    var sel = (cell.col === plantCursor.col && cell.row === plantCursor.row);
+    var soilDark = map(cell.pH, 4, 8, 0.5, 1.0);
+    var soilR = int(lerp(100, 70, 1 - soilDark)), soilG = int(lerp(55, 100, soilDark)), soilB = int(lerp(20, 35, soilDark));
+    noStroke(); fill(soilR, soilG, soilB); rect(cx2, cy2, cellW - 4, cellH - 4, 4);
+    if (cell.water > 60) { fill(60, 120, 255, 30); rect(cx2, cy2, cellW - 4, cellH - 4, 4); }
+    desenharPlanta(cx2 + cellW / 2 - 2, cy2 + cellH - 8, cell.stage, cell.type, frameCount);
+    if (cell.hasPest) { fill(255, 80, 40, 180 + sin(frameCount * 0.2) * 50); ellipse(cx2 + cellW - 12, cy2 + 10, 12, 12); fill(0); textSize(9); textAlign(CENTER, CENTER); textFont('Courier New'); text('!', cx2 + cellW - 12, cy2 + 10); }
+    fill(200, 180, 120); textSize(8); textAlign(LEFT, TOP); textFont('Courier New');
+    text('pH:' + (cell.pH).toFixed(1), cx2 + 2, cy2 + 2);
+    if (sel) { stroke(120, 255, 80); strokeWeight(2); noFill(); rect(cx2, cy2, cellW - 4, cellH - 4, 4); noStroke(); }
+    if (cell.water < 20) { stroke(60, 120, 255, 180); strokeWeight(1.5); line(cx2 + 2, cy2 + cellH - 8, cx2 + 2 + (cell.water / 100) * (cellW - 8), cy2 + cellH - 8); noStroke(); }
+    if (cell.stage > 0 && cell.stage < 5 && cell.water > 30 && cell.pH > 5.5 && cell.pH < 7.5 && !cell.hasPest) {
+      cell.growTimer++;
+      if (cell.growTimer > 240) { cell.stage = min(5, cell.stage + 1); cell.growTimer = 0; if (cell.stage === 5) plantResources.creditos = min(100, plantResources.creditos + 4); }
+    }
+    if (frameCount % 120 === 0) cell.water = max(0, cell.water - random(1, 4));
+    if (!cell.hasPest && cell.stage > 1 && random() < 0.0005) cell.hasPest = true;
   }
+  var selCell = plantGrid[plantCursor.row * PLANT_COLS + plantCursor.col];
+  if (selCell) {
+    var panY = height - 78;
+    noStroke(); fill(0, 200); rect(0, panY, width, 78);
+    stroke(60, 160, 50, 150); strokeWeight(1); line(0, panY, width, panY); noStroke();
+    fill(200, 255, 160); textFont('Courier New'); textStyle(BOLD); textSize(11); textAlign(LEFT, CENTER);
+    var stageNames = ['Solo vazio', 'Arado', 'Semeado', 'Brotando', 'Crescendo', 'Maduro'];
+    text('PARCELA (' + selCell.col + ',' + selCell.row + ') — ' + stageNames[selCell.stage], 14, panY + 14);
+    textStyle(NORMAL); fill(180, 220, 140); textSize(10);
+    text('Umidade: ' + floor(selCell.water) + '%  |  pH: ' + selCell.pH.toFixed(1) + (selCell.pH < 5.5 ? ' [ÁCIDO - use calcário]' : selCell.pH > 7.5 ? ' [ALCALINO - use enxofre]' : '  [IDEAL]'), 14, panY + 30);
+    if (selCell.hasPest) text('⚠ PRAGA DETECTADA — Use Bioinsumo para eliminar', 14, panY + 46);
+    fill(120, 200, 100); text('[ESPAÇO] Usar ferramenta: ' + PLANT_TOOLS[plantTool] + '   |   ↑↓←→ mover cursor   |   1-5 ferramenta   |   ESC sair', 14, panY + 62);
+  }
+  noStroke(); fill(0, 170); rect(0, height - 78 - 32, width, 32);
+  for (var i = 0; i < PLANT_TOOLS.length; i++) {
+    var bx2 = 10 + i * 160;
+    fill(plantTool === i ? color(35, 115, 25, 235) : color(12, 42, 10, 188)); stroke(plantTool === i ? color(90, 210, 70) : color(45, 110, 38), plantTool === i ? 2 : 1); strokeWeight(plantTool === i ? 2 : 1);
+    rect(bx2, height - 78 - 30, 150, 26, 5); noStroke();
+    fill(plantTool === i ? color(215, 255, 155) : color(140, 200, 100)); textFont('Courier New'); textStyle(BOLD); textSize(10); textAlign(CENTER, CENTER);
+    text('[' + (i + 1) + '] ' + PLANT_TOOLS[i], bx2 + 75, height - 78 - 17);
+  }
+  textStyle(NORMAL);
+  plantEfficiency = calcularEficiencia();
+  noStroke(); fill(0, 150); rect(gridOffX + PLANT_COLS * cellW + 8, 90, width - gridOffX - PLANT_COLS * cellW - 18, 380, 6);
+  fill(120, 220, 100); textFont('Courier New'); textStyle(BOLD); textSize(11); textAlign(CENTER, CENTER);
+  text('EFICIÊNCIA\nECOLÓGICA', gridOffX + PLANT_COLS * cellW + 50, 108);
+  textStyle(NORMAL);
+  var barX = gridOffX + PLANT_COLS * cellW + 30, barY = 125, barH = 220;
+  noStroke(); fill(20, 40, 15); rect(barX, barY, 40, barH, 4);
+  var eff = min(plantEfficiency, 100);
+  fill(eff > 70 ? color(80, 220, 80) : eff > 40 ? color(220, 200, 60) : color(220, 80, 60));
+  rect(barX, barY + barH * (1 - eff / 100), 40, barH * (eff / 100), 4);
+  fill(255, 255, 255); textSize(14); text(floor(eff) + '%', barX + 20, barY + barH + 18);
+  var tips = ['🌱 Ara antes\nde semear', '💧 Irriga com\ncuidado', '🌿 Bioinsumo\nbate pragas', '📊 pH 6-7\n= ideal'];
+  fill(160, 210, 120); textSize(8);
+  for (var i = 0; i < tips.length; i++) text(tips[i], barX + 20, barY + barH + 42 + i * 32);
+  if (plantMsgTimer > 0) {
+    plantMsgTimer--;
+    var msgA = min(plantMsgTimer * 8, 200);
+    noStroke(); fill(0, msgA * 0.8); rect(width / 2 - 160, height / 2 - 20, 320, 38, 6);
+    fill(120, 255, 120, msgA); textFont('Courier New'); textAlign(CENTER, CENTER); textStyle(BOLD); textSize(13);
+    text(plantMsg, width / 2, height / 2 + 2); textStyle(NORMAL);
+  }
+  if (eff >= 80 && !plantWin) {
+    plantWin = true;
+    plantMsg = '🏆 LAVOURA CERTIFICADA! Eficiência: ' + floor(eff) + '%'; plantMsgTimer = 240;
+  }
+}
 
-  function _initFarmGrid() {
-    farmGrid = [];
-    for (var r=0; r<FARM_ROWS; r++) {
-      farmGrid[r] = [];
-      for (var c=0; c<FARM_COLS; c++) {
-        farmGrid[r][c] = {state:'empty',seed:null,stage:0,moisture:80,daysPlanted:0};
+function calcularEficiencia() {
+  var total = 0;
+  for (var i = 0; i < plantGrid.length; i++) {
+    var c = plantGrid[i];
+    var score = 0;
+    if (c.stage > 0) score += c.stage * 15;
+    if (c.pH > 5.5 && c.pH < 7.5) score += 10;
+    if (c.water > 30 && c.water < 90) score += 10;
+    if (!c.hasPest) score += 5;
+    total += score;
+  }
+  return total / (plantGrid.length * 85) * 100;
+}
+
+function usarFerramentaPlanta() {
+  var idx = plantCursor.row * PLANT_COLS + plantCursor.col;
+  if (idx < 0 || idx >= plantGrid.length) return;
+  var cell = plantGrid[idx];
+  if (plantTool === 0) {
+    plantMsg = 'pH:' + cell.pH.toFixed(1) + ' Umidade:' + floor(cell.water) + '% Estágio:' + cell.stage; plantMsgTimer = 180;
+  } else if (plantTool === 1) {
+    if (cell.stage === 0) { cell.stage = 1; cell.pH = constrain(cell.pH + random(-0.2, 0.4), 5.5, 7.5); plantResources.solo = max(0, plantResources.solo - 2); plantMsg = 'Solo arado! pH ajustado.'; plantMsgTimer = 120; }
+    else { plantMsg = 'Solo já preparado!'; plantMsgTimer = 100; }
+  } else if (plantTool === 2) {
+    if (cell.stage === 1 && plantResources.sementes >= 3) { cell.stage = 2; plantResources.sementes -= 3; plantMsg = '🌱 Semeado com sucesso!'; plantMsgTimer = 120; }
+    else if (plantResources.sementes < 3) { plantMsg = 'Sementes insuficientes!'; plantMsgTimer = 120; }
+    else { plantMsg = 'Are o solo primeiro!'; plantMsgTimer = 120; }
+  } else if (plantTool === 3) {
+    if (plantResources.agua >= 8) { cell.water = min(100, cell.water + 20); plantResources.agua -= 8; plantMsg = '💧 Parcela irrigada!'; plantMsgTimer = 120; }
+    else { plantMsg = 'Água insuficiente!'; plantMsgTimer = 120; }
+  } else if (plantTool === 4) {
+    if (cell.hasPest && plantResources.creditos >= 10) { cell.hasPest = false; plantResources.creditos -= 10; plantMsg = '✅ Praga eliminada com bioinsumo!'; plantMsgTimer = 150; }
+    else if (!cell.hasPest) { plantMsg = 'Sem pragas aqui.'; plantMsgTimer = 100; }
+    else { plantMsg = 'Créditos verdes insuficientes!'; plantMsgTimer = 120; }
+  }
+}
+
+function desenharPlanta(x, y, stage, tipo, fc) {
+  noStroke();
+  if (stage === 0) return;
+  if (stage === 1) { fill(80, 55, 25); for (var i = -2; i <= 2; i++) ellipse(x + i * 5, y, 4, 3); return; }
+  if (stage === 2) { fill(80, 140, 40); ellipse(x, y - 2, 6, 8); fill(60, 100, 30); rect(x - 1, y - 2, 2, 8); return; }
+  if (stage === 3) { fill(60, 170, 50); beginShape(); vertex(x, y - 14); vertex(x - 6, y); vertex(x + 6, y); endShape(CLOSE); fill(80, 130, 40); rect(x - 1, y - 14, 2, 14); return; }
+  if (stage === 4) { fill(50, 180, 40); for (var i = -1; i <= 1; i++) { beginShape(); vertex(x + i * 8, y - 18 - abs(i) * 4); vertex(x + i * 8 - 7, y - 4); vertex(x + i * 8 + 7, y - 4); endShape(CLOSE); } fill(70, 140, 38); rect(x - 2, y - 8, 4, 8); return; }
+  if (stage >= 5) {
+    fill(40, 160, 38); for (var i = -1; i <= 1; i++) { beginShape(); vertex(x + i * 9, y - 28 - abs(i) * 5); vertex(x + i * 9 - 8, y - 6); vertex(x + i * 9 + 8, y - 6); endShape(CLOSE); }
+    fill(70, 130, 38); rect(x - 2, y - 10, 4, 10);
+    fill(240, 220, 40); ellipse(x + 5, y - 20, 8, 16);
+    fill(220, 200, 30); for (var i = 0; i < 5; i++) ellipse(x + 5, y - 25 + i * 3, 6, 3);
+    fill(100, 160, 50); for (var i = 0; i < 4; i++) line(x + 5 + 6, y - 22 + i * 3.5, x + 5 + 12, y - 25 + i * 3.5);
+    return;
+  }
+}
+
+// ═════════════════════════════════════════════════════════════
+// INPUT
+// ═════════════════════════════════════════════════════════════
+function mousePressed() {
+  if (estadoTela === 0) { userStartAudio(); osciladorFundo.start(); mudarEstado(1); return; }
+  if (estadoTela === 4 && !trailerAtivo && !campaignActive && !sandboxActive && !plantActive) {
+    var bW = 210, bH = 52, bGap = 18, totalW = 3 * bW + 2 * bGap, bX0 = (width - totalW) / 2, bY = height / 2 + 10;
+    for (var i = 0; i < 3; i++) {
+      var bx = bX0 + i * (bW + bGap);
+      if (mouseX > bx && mouseX < bx + bW && mouseY > bY && mouseY < bY + bH) {
+        if (i === 0) { campaignActive = true; campaignState = 'levelSelect'; }
+        else if (i === 1) { iniciarSandbox(); }
+        else { plantActive = true; iniciarPlantacao(); }
+        return;
       }
     }
-    for (var i=0; i<4; i++) farmGrid[3][2+i].state='tilled';
+    return;
   }
-
-  function _generateOrders() {
-    orders = [];
-    for (var i=0; i<3; i++) {
-      var o = ORDERS_POOL[(day*7+i)%ORDERS_POOL.length];
-      orders.push({crop:o.crop, qty:o.qty, reward:o.reward, label:o.label, done:false});
+  if (campaignActive) {
+    if (campaignState === 'preCutscene') { avancarCutscene(); return; }
+    if (campaignState === 'levelSelect') {
+      var cols = 3, bw = 238, bh = 105, gx = (width - cols * bw - (cols - 1) * 14) / 2, gy = 62;
+      for (var i = 0; i < 6; i++) {
+        var col = i % cols, row = floor(i / cols), bx = gx + col * (bw + 14), by = gy + row * (bh + 12);
+        if (mouseX > bx && mouseX < bx + bw && mouseY > by && mouseY < by + bh && phasesUnlocked[i]) { iniciarFase(i); return; }
+      }
     }
-  }
-
-  function _setupKeys() {
-    document.addEventListener('keydown', function(e) {
-      if (e.code==='KeyB') { _toggleUI(showUI==='build'?'none':'build'); }
-      if (e.code==='KeyI') { _toggleUI(showUI==='orders'?'none':'orders'); }
-      if (e.code==='KeyT') { _cycleTool(); }
-      if (e.code==='Escape') { showUI='none'; }
-      if (e.code==='Space'&&showUI==='bus') { _travelToCity(); }
-    });
-  }
-
-  // ============================================================
-  // INTERACTION HANDLER (called by Engine when E is pressed)
-  // ============================================================
-  function _handleInteract(obj) {
-    if (!obj) return;
-
-    if (obj.type==='bus_stop') {
-      showUI='bus';
-      nearInfo = {title:'🚌 Ponto de Ônibus', msg:'Pressione ESPAÇO para viajar à cidade!'};
+    if (campaignState === 'gameplay' && dialogActive) {
+      dialogLine++;
+      var d = DIALOGUES[currentPhase][dialogNPC.dialogSet] || [];
+      if (dialogLine >= d.length) { dialogActive = false; if (dialogNPC) dialogNPC.talking = false; dialogNPC = null; }
       return;
     }
+  }
+}
 
-    if (obj.type==='gov_office') {
-      if (hasPermit) {
-        _toast('✅ Você já tem licença de construção!');
-      } else if (docsCollected >= 3) {
-        hasPermit = true;
-        _toast('✅ Licença concedida! Pressione B para construir.');
+function keyPressed() {
+  keys[key] = true;
+  if (estadoTela === 3) {
+    osciladorFundo.stop();
+    var primeira = true;
+    try { primeira = localStorage.getItem('agrinho2026_trailer') !== '1'; } catch (e) { }
+    if (primeira) { iniciarMusicaTrailer(); musicAtiva = true; musicFrame = 0; proxNota = 0; proxAcorde = ACORDE_DUR; proxKick = 120; melodiaIdx = 0; acordeAtual = 0; if (padOscs.length > 0) { for (var i = 0; i < padOscs.length; i++) padOscs[i].amp(0.045, 1.5); if (bassOsc) bassOsc.amp(0.08, 1.5); } trailerAtivo = true; }
+    mudarEstado(4); return;
+  }
+  if (estadoTela === 4 && trailerAtivo) { finalizarTrailer(); return; }
+  if (estadoTela === 4 && !trailerAtivo && !campaignActive && !sandboxActive && !plantActive) {
+    if (key === 'r' || key === 'R') {
+      trailerFrame = 0; cam1 = 0; cam2 = 0; cam2b = 0;
+      for (var i = 0; i < graos.length; i++) { graos[i].y = random(-600, -5); graos[i].ativo = true; }
+      iniciarMusicaTrailer(); musicAtiva = true; musicFrame = 0; proxNota = 0; proxAcorde = ACORDE_DUR; proxKick = 120; melodiaIdx = 0; acordeAtual = 0;
+      if (padOscs.length > 0) { for (var i = 0; i < padOscs.length; i++) padOscs[i].amp(0.045, 1.5); if (bassOsc) bassOsc.amp(0.08, 1.5); } trailerAtivo = true;
+    }
+    return;
+  }
+  if (sandboxActive) {
+    if (keyCode === ESCAPE) { sandboxActive = false; if (document.exitPointerLock) document.exitPointerLock(); return; }
+    if (key === 'c' || key === 'C') { sbWeather = (sbWeather + 1) % 4; return; }
+    if (key >= '1' && key <= '6') { sbTool = parseInt(key) - 1; return; }
+    if (campaignState === 'gameplay' && dialogActive) {
+      if (key === 'e' || key === 'E') { dialogLine++; var d = DIALOGUES[currentPhase][dialogNPC.dialogSet] || []; if (dialogLine >= d.length) { dialogActive = false; if (dialogNPC) dialogNPC.talking = false; dialogNPC = null; } }
+    }
+    return;
+  }
+  if (plantActive) {
+    if (keyCode === ESCAPE) { plantActive = false; return; }
+    if (key >= '1' && key <= '5') { plantTool = parseInt(key) - 1; return; }
+    if (keyCode === 32) { usarFerramentaPlanta(); return; }
+    if (keyCode === LEFT_ARROW) { plantCursor.col = max(0, plantCursor.col - 1); return; }
+    if (keyCode === RIGHT_ARROW) { plantCursor.col = min(PLANT_COLS - 1, plantCursor.col + 1); return; }
+    if (keyCode === UP_ARROW) { plantCursor.row = max(0, plantCursor.row - 1); return; }
+    if (keyCode === DOWN_ARROW) { plantCursor.row = min(PLANT_ROWS - 1, plantCursor.row + 1); return; }
+    return;
+  }
+  if (!campaignActive) return;
+  if (campaignState === 'levelSelect') { if (keyCode === ESCAPE) { campaignActive = false; } return; }
+  if (campaignState === 'preCutscene') { if (keyCode === 32 || keyCode === ENTER) avancarCutscene(); return; }
+  if (campaignState === 'gameplay') {
+    if (keyCode === ESCAPE) { campaignState = 'pause'; pauseOpt = 0; if (document.exitPointerLock) document.exitPointerLock(); }
+    if ((key === 'e' || key === 'E') && dialogActive) {
+      dialogLine++; var d = DIALOGUES[currentPhase][dialogNPC.dialogSet] || [];
+      if (dialogLine >= d.length) { dialogActive = false; if (dialogNPC) dialogNPC.talking = false; dialogNPC = null; }
+    }
+    return;
+  }
+  if (campaignState === 'pause') {
+    if (keyCode === ESCAPE) campaignState = 'gameplay';
+    if (keyCode === UP_ARROW) pauseOpt = (pauseOpt + 3) % 4;
+    if (keyCode === DOWN_ARROW) pauseOpt = (pauseOpt + 1) % 4;
+    if (keyCode === ENTER || keyCode === 32) {
+      if (pauseOpt === 0) campaignState = 'gameplay';
+      else if (pauseOpt === 1) iniciarFase(currentPhase);
+      else if (pauseOpt === 2) campaignState = 'levelSelect';
+      else if (pauseOpt === 3) { campaignActive = false; if (document.exitPointerLock) document.exitPointerLock(); }
+    }
+    return;
+  }
+  if (campaignState === 'win') {
+    if (keyCode === 32 || keyCode === ENTER) { if (currentPhase < 5) iniciarFase(currentPhase + 1); else { csIdx = 0; csFrame = 0; campaignState = 'ending'; } }
+    if (keyCode === ESCAPE) campaignState = 'levelSelect';
+    return;
+  }
+  if (campaignState === 'ending') {
+    if (keyCode === ESCAPE) { campaignActive = false; if (document.exitPointerLock) document.exitPointerLock(); }
+    if (keyCode === 32 || keyCode === ENTER) csFrame = 9999;
+    return;
+  }
+}
+
+function keyReleased() {
+  keys[key] = false;
+}
+// ═════════════════════════════════════════════════════════════
+// HELPERS
+// ═════════════════════════════════════════════════════════════
+function bordaEscura() {
+  noStroke(); var M = 38;
+  for (var i = 0; i < M; i++) { var a = map(i, 0, M - 1, 65, 0); fill(0, a); rect(0, i, width, 1); rect(0, height - 1 - i, width, 1); rect(i, 0, 1, height); rect(width - 1 - i, 0, 1, height); }
+}
+
+function desenhaNuvem(x, y, w, al, pesada) {
+  noStroke();
+  var blobs = [[0, 0, 0.44, 0.23], [-0.28, 0.07, 0.30, 0.18], [0.28, 0.05, 0.30, 0.18], [-0.10, -0.10, 0.24, 0.15], [0.12, -0.08, 0.22, 0.14]];
+  for (var i = 0; i < blobs.length; i++) {
+    var ox = blobs[i][0], oy = blobs[i][1], rx = blobs[i][2], ry = blobs[i][3];
+    fill(pesada ? color(108, 115, 122, al + noise(ox, oy) * 24) : color(250, 253, 255, al - 20 + noise(ox * 10, oy * 10) * 35));
+    ellipse(x + ox * w, y + oy * w, rx * w * 2, ry * w * 2);
+  }
+  if (!pesada) { fill(170, 185, 196, al * 0.25); ellipse(x, y + w * 0.17, w * 0.52, w * 0.10); }
+}
+
+function desenhaTrator(x, y, esc) {
+  push(); translate(x, y); scale(esc); noStroke();
+  fill(28, 26, 22); ellipse(-23, 20, 38, 38); ellipse(23, 20, 38, 38);
+  fill(48, 44, 38); ellipse(-23, 20, 22, 22); ellipse(23, 20, 22, 22);
+  fill(28, 26, 22); ellipse(-40, 24, 20, 20); ellipse(40, 24, 20, 20);
+  fill(32, 52, 28); rect(-30, -12, 60, 30, 4); fill(40, 65, 34); rect(-23, -32, 46, 22, 3);
+  fill(48, 72, 40); rect(-14, -58, 28, 28, 2); fill(110, 148, 190, 72); rect(-11, -55, 22, 21, 1);
+  fill(28, 26, 22); rect(-3, -70, 6, 14, 2);
+  stroke(38, 36, 30); strokeWeight(1.5); for (var i = -3; i <= 3; i++) line(i * 9, 30, i * 9, 42);
+  noStroke(); pop();
+}
+
+function mudarEstado(s) {
+  estadoTela = s; tempoEstado = millis();
+  try { if (osciladorImpacto) { osciladorImpacto.start(); envelopeImpacto.play(osciladorImpacto); } } catch (e) { }
+}
+// ============================================================
+// BLOCO COMPLETO DAS FUNÇÕES 2D (adicione ao final do código)
+// ============================================================
+
+function executarGameplay() {
+  atualizarPlayer2D();
+  atualizarNPCs2D();
+  if (phaseTimer > 0) phaseTimer--;
+  if (phaseTimer === 0 && !phaseWin) {
+    phaseWin = true;
+    if (currentPhase < 5) phasesUnlocked[currentPhase + 1] = true;
+    saveProgress();
+  }
+  if (phaseWin) { campaignState = 'win'; return; }
+  renderizarCena2D();
+  desenharBracos2D();
+  desenharHUD2D();
+  desenharMiniMapa();
+  if (dialogActive) desenharDialogo();
+  if (pickupAnim > 0) { desenharPickupFx(); pickupAnim--; }
+}
+
+function atualizarPlayer2D() {
+  if (dialogActive) return;
+  var map2 = MAPS[currentPhase];
+  var spd = 0.12;
+  if (keyIsDown(SHIFT)) spd = 0.2;
+  if (keyIsDown(CONTROL)) spd = 0.06;
+  player.running = keyIsDown(SHIFT);
+  player.crouching = keyIsDown(CONTROL);
+  if (player.running) {
+    player.stamina = max(0, player.stamina - 0.28);
+    if (player.stamina <= 0) spd = 0.08;
+  } else player.stamina = min(100, player.stamina + 0.18);
+
+  var dx = 0, dy = 0;
+  if (keyIsDown(87) || keyIsDown(UP_ARROW)) dy -= spd;
+  if (keyIsDown(83) || keyIsDown(DOWN_ARROW)) dy += spd;
+  if (keyIsDown(65) || keyIsDown(LEFT_ARROW)) dx -= spd;
+  if (keyIsDown(68) || keyIsDown(RIGHT_ARROW)) dx += spd;
+
+  if (dx !== 0 || dy !== 0) {
+    player.angle = atan2(dy, dx);
+    player.moving = true;
+  } else {
+    player.moving = false;
+  }
+
+  var nx = player.x + dx, ny = player.y + dy, r = 0.35;
+  function isWalkable(x, y) {
+    var x1 = floor(x - r), x2 = floor(x + r);
+    var y1 = floor(y - r), y2 = floor(y + r);
+    for (var iy = y1; iy <= y2; iy++) {
+      for (var ix = x1; ix <= x2; ix++) {
+        if (ix >= 0 && ix < MAPSIZE && iy >= 0 && iy < MAPSIZE && map2[iy][ix] === 1) return false;
+      }
+    }
+    return true;
+  }
+  if (isWalkable(nx, player.y)) player.x = nx;
+  if (isWalkable(player.x, ny)) player.y = ny;
+
+  if (pointerLocked) {
+    player.angle += nativeMovX * 0.005;
+    nativeMovX = 0; nativeMovY = 0;
+  }
+
+  if (keyIsDown(69) && !dialogActive && interactCool <= 0) {
+    verificarInteracao2D();
+    interactCool = 22;
+  }
+  if (interactCool > 0) interactCool--;
+
+  if (player.moving) {
+    stepTimer++;
+    var rate = player.running ? 18 : 28;
+    if (stepTimer % rate === 0) playStep();
+  }
+}
+
+function atualizarNPCs2D() {
+  for (var i = 0; i < activeNPCs.length; i++) {
+    var npc = activeNPCs[i];
+    npc.walkTimer++;
+    if (npc.walkTimer > 80 && !npc.talking) {
+      npc.walkAngle += random(-0.2, 0.2);
+      var dx = cos(npc.walkAngle) * 0.03;
+      var dy = sin(npc.walkAngle) * 0.03;
+      var nx = npc.x + dx;
+      var ny = npc.y + dy;
+      var map2 = MAPS[currentPhase];
+      var tileX = floor(nx);
+      var tileY = floor(ny);
+      if (nx > 1 && nx < MAPSIZE-1 && ny > 1 && ny < MAPSIZE-1 && map2[tileY][tileX] !== 1) {
+        npc.x = nx;
+        npc.y = ny;
       } else {
-        showUI='gov';
-        nearInfo = {
-          title:'🏛 Prefeitura',
-          msg:'Funcionário: "Para obter a licença de construção, você precisa apresentar 3 documentos oficiais. Procure-os na propriedade!"\n\nDocumentos encontrados: '+docsCollected+'/3'
-        };
+        npc.walkAngle += PI;
+      }
+    }
+    if (npc.walkTimer > 180) npc.walkTimer = 0;
+  }
+}
+
+function verificarInteracao2D() {
+  for (var i = 0; i < activeNPCs.length; i++) {
+    var npc = activeNPCs[i];
+    if (dist(player.x, player.y, npc.x, npc.y) < 2.4) {
+      dialogActive = true;
+      dialogNPC = npc;
+      dialogLine = 0;
+      npc.talking = true;
+      playDialog();
+      return;
+    }
+  }
+  for (var i = 0; i < spots.length; i++) {
+    var sp = spots[i];
+    if (!sp.done && dist(player.x, player.y, sp.x, sp.y) < 1.8) {
+      sp.done = true;
+      objDone++;
+      pickupAnim = 45;
+      playPickup();
+      if (objDone >= objTotal) {
+        phaseWin = true;
+        if (currentPhase < 5) phasesUnlocked[currentPhase + 1] = true;
+        saveProgress();
       }
       return;
     }
-
-    if (obj.type==='document') {
-      docsCollected = Math.min(3, docsCollected+1);
-      Engine.markObjectDone(obj.id);
-      _toast('📄 Documento encontrado! ('+docsCollected+'/3)');
-      if (docsCollected>=3) _toast('✅ Todos documentos coletados! Vá à Prefeitura.');
-      return;
-    }
-
-    if (obj.type==='market') {
-      showUI='shop';
-      nearInfo = {title:'🏪 Mercado Agro'};
-      return;
-    }
-
-    if (obj.type==='order_board') {
-      showUI='orders';
-      nearInfo = {title:'📋 Quadro de Encomendas'};
-      return;
-    }
-
-    // Farm plot interaction (by world coordinate)
-    var fx = farmMapInfo ? farmMapInfo.farmX : 4;
-    var fy = farmMapInfo ? farmMapInfo.farmY : 12;
-    var px = Math.floor(obj.x) - fx;
-    var py = Math.floor(obj.y) - fy;
-    if (px>=0 && py>=0 && px<FARM_COLS && py<FARM_ROWS) {
-      _applyToolToCell(px, py);
-    }
   }
+}
 
-  function _applyToolToCell(c, r) {
-    var cell = farmGrid[r] ? farmGrid[r][c] : null;
-    if (!cell) return;
-
-    if (currentTool==='hoe') {
-      if (cell.state==='empty') {
-        cell.state='tilled'; cell.moisture=70;
-        _toast('⛏ Terra arada!');
-        _rebuildMap();
-      }
-    } else if (currentTool==='water') {
-      cell.moisture=Math.min(100,cell.moisture+35);
-      _toast('💧 Regado!');
-    } else if (currentTool==='harvest') {
-      if (cell.state==='ready') {
-        var s=SEEDS[cell.seed];
-        var earned=s.sell;
-        money+=earned; onMoneyFn(money);
-        inventory[cell.seed]=(inventory[cell.seed]||0)+1;
-        totalHarvested++;
-        _toast('+R$'+earned+' — '+s.name+' colhida! (inv: '+(inventory[cell.seed])+')');
-        cell.state='tilled'; cell.seed=null; cell.stage=0; cell.daysPlanted=0;
-        _rebuildMap();
-        _checkOrders();
-      } else {
-        _toast('Esta plantação ainda não está madura.');
-      }
-    } else if (SEEDS[currentTool]) {
-      if (cell.state==='tilled') {
-        if (!ownedSeeds[currentTool]||ownedSeeds[currentTool]<=0) {
-          _toast('Sem sementes de '+SEEDS[currentTool].name+'!');
-          return;
-        }
-        ownedSeeds[currentTool]--;
-        cell.state='planted'; cell.seed=currentTool; cell.stage=0; cell.daysPlanted=0;
-        totalPlanted++;
-        _toast('🌱 '+SEEDS[currentTool].name+' plantada!');
-        _rebuildMap();
-      } else {
-        _toast('Primeiro are o solo com a enxada!');
+function renderizarCena2D() {
+  var map2 = MAPS[currentPhase];
+  cameraX2 = player.x * TAMANHO_CELULA - width/2 + TAMANHO_CELULA/2;
+  cameraY2 = player.y * TAMANHO_CELULA - height/2 + TAMANHO_CELULA/2;
+  cameraX2 = constrain(cameraX2, 0, MAPSIZE * TAMANHO_CELULA - width);
+  cameraY2 = constrain(cameraY2, 0, MAPSIZE * TAMANHO_CELULA - height);
+  push();
+  translate(-cameraX2, -cameraY2);
+  for (var y = 0; y < MAPSIZE; y++) {
+    for (var x = 0; x < MAPSIZE; x++) {
+      var tile = map2[y][x];
+      var xp = x * TAMANHO_CELULA;
+      var yp = y * TAMANHO_CELULA;
+      if (tile === 1) { // parede
+        fill(101, 67, 33); rect(xp, yp, TAMANHO_CELULA, TAMANHO_CELULA);
+        fill(139, 90, 43); rect(xp + 4, yp + 4, TAMANHO_CELULA - 8, TAMANHO_CELULA - 8);
+      } else if (tile === 2) { // árvore
+        fill(101, 67, 33); rect(xp + 10, yp + 14, 8, 14);
+        fill(34, 139, 34); ellipse(xp + 14, yp + 10, 18, 18);
+      } else if (tile === 3) { // celeiro
+        fill(160, 80, 40); rect(xp, yp, TAMANHO_CELULA, TAMANHO_CELULA);
+        fill(200, 120, 60); rect(xp + 4, yp + 4, TAMANHO_CELULA - 8, TAMANHO_CELULA - 8);
+      } else if (tile === 4) { // milho
+        fill(80, 140, 40); rect(xp + 12, yp + 14, 4, 14);
+        fill(60, 120, 35); ellipse(xp + 14, yp + 10, 10, 12);
+      } else if (tile === 5) { // pedra
+        fill(120, 110, 100); ellipse(xp + 14, yp + 18, 18, 12);
+      } else { // chão
+        var cor = 90 + (x * 3 + y * 2) % 40;
+        fill(cor, cor - 20, cor - 50); rect(xp, yp, TAMANHO_CELULA, TAMANHO_CELULA);
+        fill(70, 50, 30, 80); ellipse(xp + 14, yp + 20, 10, 6);
       }
     }
   }
-
-  function _checkOrders() {
-    orders.forEach(function(o) {
-      if (o.done) return;
-      if ((inventory[o.crop]||0) >= o.qty) {
-        o.done = true;
-        inventory[o.crop]-=o.qty;
-        money+=o.reward; onMoneyFn(money);
-        _toast('📦 Encomenda entregue! +R$'+o.reward);
-      }
-    });
-  }
-
-  function _rebuildMap() {
-    if (!farmMapInfo) return;
-    Engine.generatePlantationMap({
-      farmGrid:farmGrid, buildings:buildings, hasPermit:hasPermit
-    });
-  }
-
-  // ============================================================
-  // CITY TRAVEL
-  // ============================================================
-  function _travelToCity() {
-    showUI='city';
-    nearInfo = {
-      title:'🏙 Cidade — Zona Comercial',
-      sections:[
-        {icon:'🏪',title:'Mercado Agro',     action:'shop'},
-        {icon:'🏛',title:'Prefeitura',        action:'gov'},
-        {icon:'📋',title:'Quadro de Encomendas',action:'orders'},
-        {icon:'🔙',title:'Voltar para fazenda', action:'return'}
-      ]
-    };
-  }
-
-  // ============================================================
-  // TOOLS
-  // ============================================================
-  function setTool(t) { currentTool=t; }
-  function _cycleTool() {
-    var tools=['hoe','water','harvest','wheat','corn','soy','coffee','cotton'];
-    var idx=tools.indexOf(currentTool);
-    currentTool=tools[(idx+1)%tools.length];
-    _toast('Ferramenta: '+_toolName(currentTool));
-  }
-  function _toolName(t){
-    var n={hoe:'⛏ Enxada',water:'💧 Regador',harvest:'🌾 Colher',
-           wheat:'🌾 Trigo',corn:'🌽 Milho',soy:'🫘 Soja',coffee:'☕ Café',cotton:'🌼 Algodão'};
-    return n[t]||t;
-  }
-
-  function _toggleUI(s) { showUI=s; }
-
-  // ============================================================
-  // NEXT DAY
-  // ============================================================
-  function nextDay() {
-    day++;
-    onDayFn(day);
-    for (var r=0;r<FARM_ROWS;r++) {
-      for (var c=0;c<FARM_COLS;c++) {
-        var cell=farmGrid[r][c];
-        if (!cell.seed) continue;
-        cell.moisture=Math.max(0,cell.moisture-20);
-        cell.daysPlanted++;
-        var s=SEEDS[cell.seed];
-        if (s) {
-          cell.stage=Math.min(s.days-1,Math.floor((cell.daysPlanted/(s.days))*4));
-          if (cell.daysPlanted>=s.days) cell.state='ready';
-          else cell.state='growing';
-        }
-      }
+  for (var i = 0; i < spots.length; i++) {
+    if (!spots[i].done) {
+      var xp = spots[i].x * TAMANHO_CELULA;
+      var yp = spots[i].y * TAMANHO_CELULA;
+      var pulse = 150 + sin(frameCount * 0.1) * 105;
+      fill(255, 100, 100, pulse); ellipse(xp + 14, yp + 14, 24, 24);
+      fill(255, 50, 50); ellipse(xp + 14, yp + 14, 16, 16);
+      fill(255); textSize(16); text('⭐', xp + 14, yp + 14);
     }
-    if (day%3===0) _generateOrders();
-    _rebuildMap();
-    _toast('☀ Dia '+day+' começa!');
   }
-
-  // ============================================================
-  // BUILD
-  // ============================================================
-  function _placeBuilding(type) {
-    if (!hasPermit) {
-      _toast('❌ Precisa de licença da Prefeitura!');
-      return;
-    }
-    var buildDefs = {
-      house: {w:4,h:4,cost:800, texId:1, name:'Casa Rural'},
-      barn:  {w:6,h:4,cost:1200,texId:2, name:'Celeiro'},
-      silo:  {w:3,h:3,cost:600, texId:5, name:'Silo'}
-    };
-    var bd=buildDefs[type];
-    if (!bd) return;
-    if (money<bd.cost) { _toast('💰 Precisa de R$'+bd.cost); return; }
-    money-=bd.cost; onMoneyFn(money);
-    var bx=16+buildings.length*6, by=10;
-    buildings.push({x:bx,y:by,w:bd.w,h:bd.h,texId:bd.texId,type:type});
-    _rebuildMap();
-    showUI='none';
-    _toast('🏠 '+bd.name+' construída!');
+  for (var i = 0; i < activeNPCs.length; i++) {
+    var npc = activeNPCs[i];
+    var ch = CHARS[npc.charIdx];
+    var xp = npc.x * TAMANHO_CELULA;
+    var yp = npc.y * TAMANHO_CELULA;
+    fill(ch.shirtR, ch.shirtG, ch.shirtB); rect(xp + 5, yp + 10, 18, 18, 3);
+    fill(ch.skinR, ch.skinG, ch.skinB); ellipse(xp + 14, yp + 8, 14, 14);
+    if (ch.hat) { fill(ch.shirtR * 0.6, ch.shirtG * 0.6, ch.shirtB * 0.6); rect(xp + 7, yp + 2, 14, 5, 2); }
+    fill(0); ellipse(xp + 10, yp + 7, 2, 2); ellipse(xp + 18, yp + 7, 2, 2);
+    fill(255, 255, 200); textSize(7); text(ch.name, xp + 14, yp - 2);
   }
+  var xp = player.x * TAMANHO_CELULA;
+  var yp = player.y * TAMANHO_CELULA;
+  fill(60, 120, 60); rect(xp + 5, yp + 10, 18, 18, 3);
+  fill(255, 200, 150); ellipse(xp + 14, yp + 8, 14, 14);
+  fill(101, 67, 33); rect(xp + 7, yp + 2, 14, 5, 2);
+  fill(0); ellipse(xp + 10, yp + 7, 2, 2); ellipse(xp + 18, yp + 7, 2, 2);
+  var ang = player.angle;
+  var dx = cos(ang) * 10, dy = sin(ang) * 10;
+  fill(255, 200, 100);
+  triangle(xp + 14 + dx, yp + 14 + dy,
+           xp + 14 + dx * 0.3 + 4, yp + 14 + dy * 0.3,
+           xp + 14 + dx * 0.3 - 4, yp + 14 + dy * 0.3);
+  pop();
+}
 
-  // ============================================================
-  // RENDER OVERLAY (HUD on top of Engine's FPS view)
-  // ============================================================
-  function _renderHUD() {
-    if (!canvas) return;
-    var c = canvas.getContext('2d');
-    if (!c) return;
-    var cW=canvas.width||900, cH=canvas.height||600;
-
-    // ---- Mini-mapa (top right) ----
-    if (!mmCanvas) { mmCanvas=document.createElement('canvas'); mmCanvas.width=120; mmCanvas.height=120; }
-    Engine.renderMinimap(mmCanvas);
-    c.save();
-    c.shadowBlur=8; c.shadowColor='rgba(0,0,0,0.6)';
-    c.drawImage(mmCanvas, cW-130, 10);
-    c.strokeStyle='rgba(255,255,255,0.25)'; c.lineWidth=1;
-    c.strokeRect(cW-130,10,120,120);
-    c.restore();
-
-    // ---- Dinheiro e dia ----
-    c.save();
-    c.fillStyle='rgba(0,0,0,0.55)';
-    c.beginPath(); _rrectC(c,10,10,200,36,8); c.fill();
-    c.fillStyle='#f5c518'; c.font='bold 15px sans-serif'; c.textBaseline='middle';
-    c.fillText('💰 R$ '+money.toLocaleString('pt-BR'),20,28);
-    c.restore();
-
-    c.save();
-    c.fillStyle='rgba(0,0,0,0.55)';
-    c.beginPath(); _rrectC(c,10,52,130,30,8); c.fill();
-    c.fillStyle='#a0d8a0'; c.font='13px sans-serif'; c.textBaseline='middle';
-    c.fillText('📅 Dia '+day,20,67);
-    c.restore();
-
-    // ---- Ferramenta atual (centro-baixo) ----
-    c.save();
-    c.fillStyle='rgba(0,0,0,0.6)';
-    c.beginPath(); _rrectC(c,cW/2-80,cH-48,160,36,18); c.fill();
-    c.fillStyle='#fff'; c.font='bold 14px sans-serif';
-    c.textAlign='center'; c.textBaseline='middle';
-    c.fillText(_toolName(currentTool),cW/2,cH-30);
-    c.restore();
-
-    // ---- Controles (bottom left) ----
-    c.save();
-    c.fillStyle='rgba(0,0,0,0.45)';
-    c.beginPath(); _rrectC(c,10,cH-78,185,70,8); c.fill();
-    c.fillStyle='rgba(255,255,255,0.55)'; c.font='11px sans-serif'; c.textBaseline='top';
-    var hints=['[E] Interagir com objetos','[T] Trocar ferramenta','[B] Modo construção','[I] Encomendas'];
-    hints.forEach(function(h,i){ c.fillText(h,18,cH-72+i*15); });
-    c.restore();
-
-    // ---- Veículo HUD ----
-    if (Engine.isInVehicle()) {
-      var veh=Engine.getNearVehicle();
-      c.save();
-      c.fillStyle='rgba(0,0,0,0.65)';
-      c.beginPath(); _rrectC(c,cW/2-80,10,160,38,8); c.fill();
-      c.fillStyle='#f5c518'; c.font='bold 14px sans-serif';
-      c.textAlign='center'; c.textBaseline='middle';
-      var vNames={tractor:'🚜 Trator',harvester:'🌾 Colheitadeira',car:'🚗 Carro',truck:'🚛 Caminhão'};
-      var vn=veh?vNames[veh.vehicleType]||'🚗 Veículo':'🚗 Veículo';
-      c.fillText(vn+' — [E] Sair',cW/2,29);
-      c.restore();
-    }
-
-    // ---- Near object hint ----
-    var nearObj=Engine.getNearObject();
-    if (nearObj&&!Engine.isInVehicle()) {
-      var hint=_getObjectHint(nearObj);
-      if (hint) {
-        c.save();
-        var hw=Math.max(200,hint.length*8+40);
-        c.fillStyle='rgba(0,0,0,0.65)';
-        c.beginPath(); _rrectC(c,cW/2-hw/2,cH/2+50,hw,32,16); c.fill();
-        c.fillStyle='#ffef60'; c.font='bold 13px sans-serif';
-        c.textAlign='center'; c.textBaseline='middle';
-        c.fillText('[E] '+hint,cW/2,cH/2+66);
-        c.restore();
-      }
-    }
-    var nearVeh=Engine.getNearVehicle();
-    if (nearVeh&&!Engine.isInVehicle()) {
-      c.save();
-      c.fillStyle='rgba(0,0,0,0.65)';
-      c.beginPath(); _rrectC(c,cW/2-100,cH/2+50,200,32,16); c.fill();
-      c.fillStyle='#ffef60'; c.font='bold 13px sans-serif';
-      c.textAlign='center'; c.textBaseline='middle';
-      var vNames2={tractor:'🚜 Entrar no Trator',harvester:'🌾 Entrar na Colheitadeira',car:'🚗 Entrar no Carro',truck:'🚛 Entrar no Caminhão'};
-      c.fillText('[E] '+(vNames2[nearVeh.vehicleType]||'Entrar no veículo'),cW/2,cH/2+66);
-      c.restore();
-    }
-
-    // ---- Toast ----
-    if (toast && toastTimer>0) {
-      var ta=Math.min(1,toastTimer/0.4);
-      c.save(); c.globalAlpha=ta*0.92;
-      var tw=Math.max(180,toast.length*9+40);
-      c.fillStyle='rgba(10,40,5,0.9)';
-      c.beginPath(); _rrectC(c,cW/2-tw/2,cH*0.32,tw,36,18); c.fill();
-      c.fillStyle='#a0ffa0'; c.font='bold 14px sans-serif';
-      c.textAlign='center'; c.textBaseline='middle';
-      c.fillText(toast,cW/2,cH*0.32+18);
-      c.restore();
-      toastTimer-=0.016;
-      if(toastTimer<=0) toast=null;
-    }
-
-    // ---- UI Overlays ----
-    if (showUI==='build')   _drawBuildMenu(c,cW,cH);
-    if (showUI==='orders')  _drawOrdersMenu(c,cW,cH);
-    if (showUI==='shop')    _drawShopMenu(c,cW,cH);
-    if (showUI==='city')    _drawCityMenu(c,cW,cH);
-    if (showUI==='gov')     _drawGovDialog(c,cW,cH);
-    if (showUI==='bus')     _drawBusDialog(c,cW,cH);
-  }
-
-  function _getObjectHint(o) {
-    if (o.type==='bus_stop') return 'Viajar para a Cidade';
-    if (o.type==='gov_office') return 'Prefeitura';
-    if (o.type==='document') return 'Pegar Documento';
-    if (o.type==='market'||o.type==='order_board') return 'Abrir '+((o.type==='market')?'Loja':'Encomendas');
-    return 'Interagir';
-  }
-
-  // ============================================================
-  // UI OVERLAYS
-  // ============================================================
-  function _drawBuildMenu(c,cW,cH) {
-    _modal(c,cW,cH,320,300);
-    c.fillStyle='#f5c518'; c.font='bold 18px sans-serif';
-    c.textAlign='center'; c.fillText('🏗 Construção',cW/2,cH/2-115);
-    if(!hasPermit) {
-      c.fillStyle='#ff8080'; c.font='13px sans-serif';
-      c.fillText('❌ Sem licença! Vá à Prefeitura.',cW/2,cH/2-85);
-    }
-    var items=[
-      {icon:'🏠',name:'Casa Rural',   type:'house',cost:800},
-      {icon:'🏚',name:'Celeiro',      type:'barn', cost:1200},
-      {icon:'⛽',name:'Silo',         type:'silo', cost:600}
-    ];
-    items.forEach(function(item,i){
-      var iy=cH/2-50+i*55;
-      var active=hasPermit&&money>=item.cost;
-      c.fillStyle=active?'rgba(40,100,20,0.7)':'rgba(40,20,20,0.5)';
-      c.beginPath(); _rrectC(c,cW/2-130,iy,260,45,10); c.fill();
-      c.fillStyle=active?'#fff':'rgba(255,255,255,0.4)'; c.font='bold 14px sans-serif';
-      c.textAlign='left'; c.fillText(item.icon+' '+item.name,cW/2-115,iy+25);
-      c.textAlign='right'; c.fillStyle=active?'#f5c518':'rgba(245,197,24,0.4)';
-      c.fillText('R$'+item.cost,cW/2+120,iy+25);
-      if(active) {
-        (function(t2){ canvas.addEventListener('click',function once(ev){
-          if(showUI!=='build') return;
-          var rect=canvas.getBoundingClientRect();
-          var mx=ev.clientX-rect.left, my=ev.clientY-rect.top;
-          if(mx>cW/2-130&&mx<cW/2+130&&my>iy&&my<iy+45){
-            _placeBuilding(t2); canvas.removeEventListener('click',once);
-          }
-        },{once:true});})(item.type);
-      }
-    });
-    _closeBtn(c,cW,cH);
-  }
-
-  function _drawOrdersMenu(c,cW,cH) {
-    _modal(c,cW,cH,360,280);
-    c.fillStyle='#f5c518'; c.font='bold 17px sans-serif';
-    c.textAlign='center'; c.fillText('📋 Encomendas',cW/2,cH/2-108);
-    orders.forEach(function(o,i){
-      var oy=cH/2-75+i*68;
-      var has=(inventory[o.crop]||0)>=o.qty;
-      c.fillStyle=o.done?'rgba(20,80,20,0.6)':has?'rgba(80,60,10,0.6)':'rgba(20,20,20,0.5)';
-      c.beginPath(); _rrectC(c,cW/2-155,oy,310,55,10); c.fill();
-      c.fillStyle=o.done?'#60e060':has?'#f5c518':'#aaa';
-      c.font='bold 13px sans-serif'; c.textAlign='left';
-      c.fillText((o.done?'✅ ':'📦 ')+o.label,cW/2-142,oy+20);
-      c.fillStyle=o.done?'#60e060':'#80d080'; c.font='12px sans-serif';
-      c.fillText('Recompensa: R$'+o.reward,cW/2-142,oy+38);
-      c.fillStyle='rgba(255,255,255,0.55)'; c.textAlign='right'; c.font='12px sans-serif';
-      c.fillText(o.done?'ENTREGUE':'Inv: '+(inventory[o.crop]||0)+'/'+o.qty,cW/2+145,oy+20);
-    });
-    _closeBtn(c,cW,cH);
-  }
-
-  function _drawShopMenu(c,cW,cH) {
-    _modal(c,cW,cH,340,280);
-    c.fillStyle='#f5c518'; c.font='bold 17px sans-serif';
-    c.textAlign='center'; c.fillText('🏪 Mercado Agro',cW/2,cH/2-108);
-    SHOP_ITEMS.forEach(function(item,i){
-      var iy=cH/2-72+i*50;
-      var canBuy=money>=item.cost;
-      c.fillStyle=canBuy?'rgba(30,90,20,0.6)':'rgba(20,20,20,0.5)';
-      c.beginPath(); _rrectC(c,cW/2-145,iy,290,42,8); c.fill();
-      c.fillStyle=canBuy?'#fff':'rgba(255,255,255,0.4)'; c.font='bold 13px sans-serif';
-      c.textAlign='left'; c.fillText(item.name,cW/2-132,iy+22);
-      c.textAlign='right'; c.fillStyle=canBuy?'#f5c518':'rgba(245,197,24,0.4)';
-      c.fillText('R$'+item.cost,cW/2+130,iy+22);
-      if(canBuy) {
-        (function(it){ canvas.addEventListener('click',function once(ev){
-          if(showUI!=='shop') return;
-          var rect=canvas.getBoundingClientRect();
-          var mx=ev.clientX-rect.left, my=ev.clientY-rect.top;
-          if(mx>cW/2-145&&mx<cW/2+145&&my>iy&&my<iy+42){
-            money-=it.cost; onMoneyFn(money);
-            ownedSeeds[it.seed]=(ownedSeeds[it.seed]||0)+it.qty;
-            _toast('✅ '+it.name+' comprado!'); canvas.removeEventListener('click',once);
-          }
-        },{once:true});})(item);
-      }
-    });
-    _closeBtn(c,cW,cH);
-  }
-
-  function _drawCityMenu(c,cW,cH) {
-    _modal(c,cW,cH,360,300);
-    // City skyline visual
-    ctx_cityBg(c,cW,cH);
-    c.fillStyle='#f5c518'; c.font='bold 18px sans-serif';
-    c.textAlign='center'; c.fillText('🏙 Zona Comercial',cW/2,cH/2-108);
-    var secs=[
-      {icon:'🏪',label:'Mercado Agro',     sub:'Comprar sementes', ui:'shop'},
-      {icon:'🏛',label:'Prefeitura',        sub:'Obter licença de construção', ui:'gov'},
-      {icon:'📋',label:'Encomendas',        sub:'Ver pedidos pendentes', ui:'orders'},
-      {icon:'🔙',label:'Voltar para Fazenda',sub:'Fim da visita', ui:'return'}
-    ];
-    secs.forEach(function(s,i){
-      var sy=cH/2-65+i*58;
-      c.fillStyle='rgba(10,30,10,0.65)';
-      c.beginPath(); _rrectC(c,cW/2-150,sy,300,50,10); c.fill();
-      c.fillStyle='#fff'; c.font='bold 15px sans-serif'; c.textAlign='left';
-      c.fillText(s.icon+' '+s.label,cW/2-130,sy+22);
-      c.fillStyle='rgba(255,255,255,0.55)'; c.font='11px sans-serif';
-      c.fillText(s.sub,cW/2-130,sy+38);
-      (function(su){ canvas.addEventListener('click',function once(ev){
-        if(showUI!=='city') return;
-        var rect=canvas.getBoundingClientRect();
-        var mx=ev.clientX-rect.left, my=ev.clientY-rect.top;
-        if(mx>cW/2-150&&mx<cW/2+150&&my>sy&&my<sy+50){
-          if(su==='return') { showUI='none'; _toast('🚌 De volta à fazenda!'); }
-          else { showUI=su; }
-          canvas.removeEventListener('click',once);
-        }
-      },{once:true});})(s.ui);
-    });
-  }
-
-  function ctx_cityBg(c,cW,cH) {
-    var bx=cW/2-150, by=cH/2-130, bw=300, bh=40;
-    for(var bi=0;bi<8;bi++) {
-      var bX=bx+bi*38, bH=25+Math.sin(bi*2.1)*15;
-      c.fillStyle='rgba(40,50,80,0.6)';
-      c.fillRect(bX,by+bh-bH,30,bH);
-      c.fillStyle='rgba(255,220,80,0.4)';
-      for(var wi=0;wi<2;wi++) for(var wj=0;wj<3;wj++) {
-        if((bi+wi+wj)%2===0) c.fillRect(bX+4+wi*12,by+bh-bH+4+wj*7,8,5);
+function desenharMiniMapa() {
+  var map2 = MAPS[currentPhase];
+  var miniSize = 90;
+  var cellSize = miniSize / 9;
+  var offsetX = width - miniSize - 10;
+  var offsetY = 55;
+  fill(0, 180); rect(offsetX - 2, offsetY - 2, miniSize + 4, miniSize + 4, 5);
+  var startX = max(0, min(MAPSIZE - 9, floor(player.x) - 4));
+  var startY = max(0, min(MAPSIZE - 9, floor(player.y) - 4));
+  for (var i = 0; i < 9; i++) {
+    for (var j = 0; j < 9; j++) {
+      var mapX = startX + j, mapY = startY + i;
+      if (mapX < MAPSIZE && mapY < MAPSIZE) {
+        var tile = map2[mapY][mapX];
+        var cor = (tile === 1) ? color(80, 70, 50) : color(100, 80, 50);
+        fill(cor);
+        rect(offsetX + j * cellSize, offsetY + i * cellSize, cellSize, cellSize);
       }
     }
   }
-
-  function _drawGovDialog(c,cW,cH) {
-    _modal(c,cW,cH,360,240);
-    c.fillStyle='#80a0ff'; c.font='bold 17px sans-serif';
-    c.textAlign='center'; c.fillText('🏛 Prefeitura Municipal',cW/2,cH/2-95);
-    c.fillStyle='rgba(200,200,255,0.7)'; c.font='13px sans-serif';
-    var lines=[];
-    if(hasPermit) {
-      lines=['✅ Licença de Construção ATIVA!','Você pode construir livremente','na sua propriedade. Bom trabalho!'];
-    } else if(docsCollected>=3) {
-      lines=['✅ Todos os documentos coletados!','Pressione [E] perto do escritório','para confirmar e obter a licença.'];
-    } else {
-      lines=[
-        '"Para licença de construção,',
-        'você precisa de 3 documentos oficiais.',
-        'Procure-os espalhados na propriedade!"',
-        '','Documentos: '+docsCollected+'/3'
-      ];
-    }
-    lines.forEach(function(l,i){ c.fillText(l,cW/2,cH/2-55+i*22); });
-    _closeBtn(c,cW,cH);
-  }
-
-  function _drawBusDialog(c,cW,cH) {
-    _modal(c,cW,cH,340,180);
-    c.fillStyle='#80e080'; c.font='bold 17px sans-serif';
-    c.textAlign='center'; c.fillText('🚌 Ponto de Ônibus',cW/2,cH/2-70);
-    c.fillStyle='rgba(200,255,200,0.7)'; c.font='13px sans-serif';
-    c.fillText('"O próximo ônibus parte em alguns instantes."',cW/2,cH/2-35);
-    c.fillText('"Deseja viajar para a cidade?"',cW/2,cH/2-12);
-    // Buttons
-    var yBtn=cH/2+20;
-    c.fillStyle='rgba(20,120,40,0.8)'; c.beginPath(); _rrectC(c,cW/2-110,yBtn,100,36,8); c.fill();
-    c.fillStyle='#fff'; c.font='bold 13px sans-serif'; c.fillText('[ESPAÇO] Sim!',cW/2-60,yBtn+22);
-    c.fillStyle='rgba(120,20,20,0.8)'; c.beginPath(); _rrectC(c,cW/2+10,yBtn,100,36,8); c.fill();
-    c.fillStyle='#fff'; c.fillText('[ESC] Não',cW/2+60,yBtn+22);
-  }
-
-  // ============================================================
-  // DRAWING HELPERS
-  // ============================================================
-  function _modal(c,cW,cH,w,h) {
-    c.fillStyle='rgba(0,0,0,0.72)';
-    c.fillRect(0,0,cW,cH);
-    var mg=c.createLinearGradient(cW/2-w/2,cH/2-h/2,cW/2+w/2,cH/2+h/2);
-    mg.addColorStop(0,'rgba(8,28,8,0.97)');
-    mg.addColorStop(1,'rgba(4,18,4,0.97)');
-    c.fillStyle=mg;
-    c.beginPath(); _rrectC(c,cW/2-w/2,cH/2-h/2,w,h,16); c.fill();
-    c.strokeStyle='rgba(77,184,106,0.4)'; c.lineWidth=1.5; c.stroke();
-  }
-
-  function _closeBtn(c,cW,cH) {
-    c.fillStyle='rgba(255,255,255,0.15)';
-    c.beginPath(); _rrectC(c,cW/2-45,cH/2+110,90,28,14); c.fill();
-    c.fillStyle='rgba(255,255,255,0.6)'; c.font='12px sans-serif';
-    c.textAlign='center'; c.textBaseline='middle';
-    c.fillText('[ESC] Fechar',cW/2,cH/2+124);
-    canvas.addEventListener('click',function once(ev){
-      if(showUI==='none') return;
-      var rect=canvas.getBoundingClientRect();
-      var my=ev.clientY-rect.top, mx=ev.clientX-rect.left;
-      if(mx>cW/2-45&&mx<cW/2+45&&my>cH/2+110&&my<cH/2+138){
-        showUI='none'; canvas.removeEventListener('click',once);
-      }
-    },{once:true});
-  }
-
-  function _rrectC(c,x,y,w,h,r) {
-    c.moveTo(x+r,y); c.lineTo(x+w-r,y); c.quadraticCurveTo(x+w,y,x+w,y+r);
-    c.lineTo(x+w,y+h-r); c.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
-    c.lineTo(x+r,y+h); c.quadraticCurveTo(x,y+h,x,y+h-r);
-    c.lineTo(x,y+r); c.quadraticCurveTo(x,y,x+r,y);
-    c.closePath();
-  }
-
-  function _toast(msg) {
-    toast=msg; toastTimer=2.5;
-  }
-
-  // ============================================================
-  // RENDER LOOP (Engine renders FPS, we render HUD on top)
-  // ============================================================
-  function startRender() {
-    if (running) return;
-    running = true;
-    Engine.start(0, {
-      quality: 'medium',
-      onTimerEnd: function(){}
-    });
-    // Re-generate plantation map after Engine.start() (which calls generateMap(0))
-    setTimeout(function(){
-      farmMapInfo = Engine.generatePlantationMap({
-        farmGrid: farmGrid, buildings: buildings, hasPermit: hasPermit
-      });
-    }, 50);
-
-    function hudLoop() {
-      if (!running) return;
-      animFrame = requestAnimationFrame(hudLoop);
-      _renderHUD();
-    }
-    animFrame = requestAnimationFrame(hudLoop);
-  }
-
-  function stopRender() {
-    running = false;
-    if (animFrame) { cancelAnimationFrame(animFrame); animFrame = null; }
-    Engine.stop();
-  }
-
-  // ============================================================
-  // STATE PERSISTENCE
-  // ============================================================
-  function getState() {
-    return {
-      money:money, day:day,
-      farmGrid:farmGrid,
-      hasPermit:hasPermit, docsCollected:docsCollected,
-      buildings:buildings, inventory:inventory,
-      ownedSeeds:ownedSeeds, orders:orders,
-      totalPlanted:totalPlanted, totalHarvested:totalHarvested
-    };
-  }
-
-  function loadState(s) {
-    if (!s) return;
-    money=s.money||1200; day=s.day||1;
-    farmGrid=s.farmGrid||farmGrid;
-    hasPermit=s.hasPermit||false; docsCollected=s.docsCollected||0;
-    buildings=s.buildings||[]; inventory=s.inventory||{};
-    ownedSeeds=s.ownedSeeds||{wheat:10,corn:5,soy:5,coffee:2,cotton:2};
-    orders=s.orders||[]; totalPlanted=s.totalPlanted||0; totalHarvested=s.totalHarvested||0;
-  }
-
-  function getMoney() { return money; }
-  function getDay()   { return day; }
-  function getShopItems() { return SHOP_ITEMS; }
-
-  function setTooltip(el) {}
-  function buyItem(id) {
-    var item=SHOP_ITEMS.find(function(i){return i.id===id;});
-    if(!item||money<item.cost) return;
-    money-=item.cost; onMoneyFn(money);
-    if(item.type==='seed') ownedSeeds[item.seed]=(ownedSeeds[item.seed]||0)+item.qty;
-  }
-
-  function unlockAchievement(id) {
-    if(window.Game&&Game.unlockAchievement) Game.unlockAchievement(id,'','');
-  }
-
-  return {
-    init:init, resize:resize,
-    startRender:startRender, stopRender:stopRender,
-    nextDay:nextDay,
-    setTool:setTool,
-    getState:getState, loadState:loadState,
-    getMoney:getMoney, getDay:getDay,
-    getShopItems:getShopItems,
-    buyItem:buyItem,
-    setTooltip:setTooltip
-  };
-
-   /* ============================================================
-   AGRO FORTE — Trailer Cinemático Estilo Agronegócios
-   Drone shots, aurora, lavouras, personagens — zero libs externas
-   ============================================================ */
-
-var Trailer = (function() {
-
-  var canvas, ctx, W, H;
-  var animFrame = null;
-  var startTime = 0;
-  var onEnd = null;
-  var audioCtx = null;
-  var audioNodes = [];
-  var DURATION = 34;
-
-  function start(c, cb) {
-    canvas = c; ctx = c.getContext('2d');
-    W = canvas.width  = canvas.offsetWidth  || 1280;
-    H = canvas.height = canvas.offsetHeight || 720;
-    onEnd = cb || function(){};
-    startTime = performance.now();
-    _startMusic();
-    if (animFrame) cancelAnimationFrame(animFrame);
-    _loop(startTime);
-  }
-
-  function stop() {
-    if (animFrame) { cancelAnimationFrame(animFrame); animFrame = null; }
-    audioNodes.forEach(function(n){ try{n.stop&&n.stop();}catch(e){} });
-    audioNodes = [];
-    if (audioCtx) { try{audioCtx.close();}catch(e){} audioCtx = null; }
-  }
-
-  function _loop(now) {
-    animFrame = requestAnimationFrame(_loop);
-    var t = (now - startTime) / 1000;
-    W = canvas.width  = canvas.offsetWidth  || 1280;
-    H = canvas.height = canvas.offsetHeight || 720;
-    ctx.clearRect(0, 0, W, H);
-
-    if      (t <  5)        _sceneAerialDawn(t, 5);
-    else if (t < 11)        _sceneSunrise(t - 5, 6);
-    else if (t < 18)        _sceneTractorDrive(t - 11, 7);
-    else if (t < 24)        _sceneCharacters(t - 18, 6);
-    else if (t < 30)        _sceneMissions(t - 24, 6);
-    else if (t < DURATION)  _sceneEpicTitle(t - 30, DURATION - 30);
-    else { stop(); onEnd(); return; }
-
-    // Cross-fade between scenes
-    var breaks = [4.6, 10.6, 17.6, 23.6, 29.6];
-    breaks.forEach(function(bt) {
-      var d = Math.abs(t - bt);
-      if (d < 0.4) {
-        ctx.fillStyle = 'rgba(0,0,0,' + (1 - d/0.4) + ')';
-        ctx.fillRect(0,0,W,H);
-      }
-    });
-
-    if (t < 2.5) {
-      ctx.save();
-      ctx.globalAlpha = Math.min(1,t*2)*0.35;
-      ctx.fillStyle='#fff';
-      ctx.font='13px sans-serif';
-      ctx.textAlign='right';
-      ctx.textBaseline='bottom';
-      ctx.fillText('ESPAÇO para pular', W-18, H-14);
-      ctx.restore();
-    }
-  }
-
-  /* =========================================================
-     CENA 1: DRONE AÉREO — câmera de cima descendo para horizonte
-  ========================================================= */
-  function _sceneAerialDawn(t, dur) {
-    var prog = t / dur;
-
-    // Céu pré-amanhecer
-    var sky = ctx.createLinearGradient(0,0,0,H);
-    sky.addColorStop(0, _lerpColor('#04041a','#1a2050', prog));
-    sky.addColorStop(0.5,_lerpColor('#180a28','#a82020', prog));
-    sky.addColorStop(1,  _lerpColor('#080808','#e89828', prog));
-    ctx.fillStyle = sky; ctx.fillRect(0,0,W,H);
-
-    // Estrelas a desaparecer
-    if (prog < 0.75) {
-      var sa = (1 - prog/0.75) * 0.85;
-      for (var i=0; i<90; i++) {
-        var sx=(Math.sin(i*173.7)*0.5+0.5)*W, sy=(Math.sin(i*97.3)*0.5+0.5)*H*0.55;
-        var tw=Math.abs(Math.sin(t*1.5+i))*0.4+0.6;
-        ctx.save(); ctx.globalAlpha=sa*tw;
-        ctx.fillStyle='#fff';
-        ctx.beginPath(); ctx.arc(sx,sy,Math.abs(Math.sin(i*31))*1.4+0.3,0,Math.PI*2); ctx.fill();
-        ctx.restore();
-      }
-    }
-
-    // Câmera drone: de top-down para horizonte
-    var tilt = _easeInOut(Math.min(1, prog * 1.3));
-    var scaleY = 0.15 + tilt * 0.85;
-    var offY   = (1 - scaleY) * H * 0.40;
-
-    ctx.save();
-    ctx.transform(1, 0, 0, scaleY, 0, offY);
-    _drawAerialCrops(t, prog);
-    ctx.restore();
-
-    // Brilho no horizonte
-    if (prog > 0.25) {
-      var ga = (prog-0.25)/0.75;
-      var gy = H * (0.5 - tilt*0.1);
-      var hgr = ctx.createRadialGradient(W*0.55, gy, 0, W*0.55, gy, W*0.5);
-      hgr.addColorStop(0,  'rgba(255,150,20,'+ga*0.65+')');
-      hgr.addColorStop(0.3,'rgba(240,60,0,'+ga*0.25+')');
-      hgr.addColorStop(1,  'rgba(0,0,0,0)');
-      ctx.fillStyle=hgr; ctx.fillRect(0,0,W,H);
-    }
-
-    if (t > 1.8) {
-      var ta=Math.min(1,(t-1.8)*1.4);
-      _text('NO CORAÇÃO DO PARANÁ...', W/2, H*0.84, ta, 22, '#f5e090', true);
-    }
-    _letterbox();
-  }
-
-  function _drawAerialCrops(t, prog) {
-    var cols=24, rows=20;
-    var cw=W/cols, ch=H/rows;
-    var camX=W*0.08+Math.sin(t*0.13)*W*0.04;
-    var camY=H*0.08+Math.cos(t*0.10)*H*0.03;
-    var palette=['#1a4a08','#2a6012','#3a7820','#8a6a10','#d4b830','#5a8012','#2a5008','#6a9022'];
-
-    for (var r=-1; r<=rows+1; r++) {
-      for (var c=-1; c<=cols+1; c++) {
-        var wx=c*cw-camX, wy=r*ch-camY;
-        var idx=((r*7+c*3)%palette.length+palette.length)%palette.length;
-        ctx.fillStyle=palette[idx];
-        ctx.fillRect(wx,wy,cw-1,ch-1);
-        if ((r+c)%2===0) {
-          ctx.fillStyle='rgba(0,0,0,0.22)';
-          for (var li=0;li<4;li++) ctx.fillRect(wx+li*(cw/4),wy,1,ch-1);
-        }
-      }
-    }
-
-    // Celeiro e casa vista de cima
-    ctx.fillStyle='#c87840'; ctx.fillRect(W*0.38-camX,H*0.38-camY,62,46);
-    ctx.fillStyle='#8a1a10'; ctx.fillRect(W*0.48-camX+18,H*0.38-camY,92,62);
-
-    // Trator se movendo
-    var tx=W*0.28+Math.cos(t*0.38)*W*0.1-camX;
-    var ty=H*0.48+Math.sin(t*0.32)*H*0.08-camY;
-    ctx.fillStyle='#e8a820'; ctx.fillRect(tx-9,ty-6,24,15);
-    ctx.fillStyle='#444';
-    ctx.beginPath(); ctx.arc(tx,ty+10,5,0,Math.PI*2); ctx.fill();
-    ctx.beginPath(); ctx.arc(tx+14,ty+10,5,0,Math.PI*2); ctx.fill();
-  }
-
-  /* =========================================================
-     CENA 2: NASCER DO SOL — horizonte dourado cinematográfico
-  ========================================================= */
-  function _sceneSunrise(t, dur) {
-    var prog = t / dur;
-
-    var sky = ctx.createLinearGradient(0,0,0,H);
-    sky.addColorStop(0, _lerpColor('#1a2a6c','#2c3e8a',prog));
-    sky.addColorStop(0.3,_lerpColor('#b21f1f','#e87030',prog));
-    sky.addColorStop(0.6,_lerpColor('#fdbb2d','#ffd060',prog));
-    sky.addColorStop(1,'#1a4010');
-    ctx.fillStyle=sky; ctx.fillRect(0,0,W,H);
-
-    // Sol
-    var sunX=W*0.58, sunY=H*(0.72-prog*0.35), sunR=55+prog*35;
-    var sg=ctx.createRadialGradient(sunX,sunY,0,sunX,sunY,sunR*3.5);
-    sg.addColorStop(0,'rgba(255,255,200,1)');
-    sg.addColorStop(0.14,'rgba(255,220,80,0.9)');
-    sg.addColorStop(0.4,'rgba(255,110,10,0.35)');
-    sg.addColorStop(1,'rgba(0,0,0,0)');
-    ctx.fillStyle=sg; ctx.beginPath(); ctx.arc(sunX,sunY,sunR*3.5,0,Math.PI*2); ctx.fill();
-    ctx.fillStyle='#ffffc0'; ctx.beginPath(); ctx.arc(sunX,sunY,sunR*0.45,0,Math.PI*2); ctx.fill();
-
-    // Raios de luz
-    ctx.save(); ctx.globalAlpha=0.12+Math.sin(t*1.8)*0.03;
-    for (var ri=0;ri<10;ri++) {
-      var ra=(ri/10)*Math.PI*2+t*0.08;
-      ctx.strokeStyle='#ffe090'; ctx.lineWidth=1.5;
-      ctx.beginPath(); ctx.moveTo(sunX,sunY);
-      ctx.lineTo(sunX+Math.cos(ra)*W*0.6,sunY+Math.sin(ra)*W*0.6); ctx.stroke();
-    }
-    ctx.restore();
-
-    // Silhueta de morros
-    ctx.fillStyle='#1a3810';
-    ctx.beginPath(); ctx.moveTo(0,H);
-    for (var hx=0;hx<=W;hx+=8) {
-      ctx.lineTo(hx,H*0.56+Math.sin(hx*0.012+0.5)*26+Math.sin(hx*0.028+1.2)*14+Math.sin(hx*0.006)*38);
-    }
-    ctx.lineTo(W,H); ctx.closePath(); ctx.fill();
-
-    // Campo com fileiras
-    var gGrad=ctx.createLinearGradient(0,H*0.56,0,H);
-    gGrad.addColorStop(0,'#2a6012'); gGrad.addColorStop(1,'#1a3808');
-    ctx.fillStyle=gGrad; ctx.fillRect(0,H*0.58,W,H*0.42);
-
-    ctx.save(); ctx.globalAlpha=0.55;
-    for (var row=0;row<16;row++) {
-      var rY=H-(row+1)*((H*0.42)/16);
-      var rW=W*(0.12+row*0.055);
-      ctx.strokeStyle='rgba(80,160,20,'+(1-row/16)*0.45+')';
-      ctx.lineWidth=1.5;
-      ctx.beginPath(); ctx.moveTo((W-rW)/2,rY); ctx.lineTo((W-rW)/2+rW,rY); ctx.stroke();
-    }
-    ctx.restore();
-
-    // Trator em silhueta
-    var tx2=W*0.14+t*(W*0.12);
-    _tractorSil(tx2, H*0.78, 0.95);
-
-    // Poeira
-    ctx.save();
-    for (var di=0;di<14;di++) {
-      var da=(1-di/14)*0.28, dx=tx2-30-di*16, dy=H*0.78-di*3;
-      ctx.globalAlpha=da;
-      ctx.fillStyle='#c8a060';
-      ctx.beginPath(); ctx.arc(dx,dy,7+di*2,0,Math.PI*2); ctx.fill();
-    }
-    ctx.restore();
-
-    if (t>1.2) _text('UMA FAZENDA PRECISA DE VOCÊ', W/2, H*0.14, Math.min(1,(t-1.2)*1.6), 28,'#ffe590',true);
-    _letterbox();
-  }
-
-  /* =========================================================
-     CENA 3: TRATOR EM AÇÃO — close lateral, câmera rastreando
-  ========================================================= */
-  function _sceneTractorDrive(t, dur) {
-    var prog = t / dur;
-
-    var sky=ctx.createLinearGradient(0,0,0,H*0.55);
-    sky.addColorStop(0,'#2c5c9a'); sky.addColorStop(1,'#78b4d0');
-    ctx.fillStyle=sky; ctx.fillRect(0,0,W,H*0.55);
-
-    // Morros distantes
-    ctx.fillStyle='#2a5a18';
-    ctx.beginPath(); ctx.moveTo(0,H*0.55);
-    for (var hx=0;hx<=W;hx+=6) ctx.lineTo(hx,H*0.55-Math.sin(hx*0.009+2)*18-Math.sin(hx*0.022)*10);
-    ctx.lineTo(W,H*0.55); ctx.closePath(); ctx.fill();
-
-    // Chão
-    var gG=ctx.createLinearGradient(0,H*0.5,0,H);
-    gG.addColorStop(0,'#3a7818'); gG.addColorStop(1,'#1a3808');
-    ctx.fillStyle=gG; ctx.fillRect(0,H*0.5,W,H*0.5);
-
-    // Fileiras de plantação rolando
-    var camOffX=t*115;
-    ctx.save();
-    for (var row=0;row<22;row++) {
-      var rF=row/21;
-      var ry=H*0.52+rF*H*0.48;
-      var rH=3+rF*62;
-      var rSp=22+rF*85;
-      for (var col=-2;col<W/rSp+4;col++) {
-        var cx=col*rSp-(camOffX*(0.1+rF*0.9))%rSp;
-        var stH=rH*(0.55+Math.sin(cx*0.45+row)*0.45);
-        ctx.fillStyle=row%2===0?'#3a8018':'#2a6010';
-        ctx.fillRect(cx-3,ry-stH,6,stH);
-        if (row>13) {
-          ctx.fillStyle='#d4b020';
-          ctx.beginPath(); ctx.ellipse(cx,ry-stH-7,4,11,0,0,Math.PI*2); ctx.fill();
-        }
-      }
-    }
-    ctx.restore();
-
-    // Trator colorido grande
-    var tx=W*0.38+prog*W*0.04, ty=H*0.64, sc=2.4;
-    ctx.save(); ctx.translate(tx,ty); ctx.scale(sc,sc);
-    ctx.fillStyle='#d4a020'; ctx.fillRect(-56,-44,82,40);
-    ctx.fillStyle='#e8b830'; ctx.fillRect(-30,-62,40,22);
-    ctx.fillStyle='#88bbdd'; ctx.fillRect(-28,-60,36,19);
-    ctx.fillStyle='#333';
-    ctx.beginPath(); ctx.arc(-38,0,22,0,Math.PI*2); ctx.fill();
-    ctx.beginPath(); ctx.arc(24,0,16,0,Math.PI*2); ctx.fill();
-    ctx.fillStyle='#555';
-    ctx.beginPath(); ctx.arc(-38,0,18,0,Math.PI*2); ctx.fill();
-    ctx.beginPath(); ctx.arc(24,0,12,0,Math.PI*2); ctx.fill();
-    for (var sp=0;sp<6;sp++) {
-      var sa=(sp/6)*Math.PI*2+t*3.2;
-      ctx.strokeStyle='#888'; ctx.lineWidth=2;
-      ctx.beginPath(); ctx.moveTo(-38,0); ctx.lineTo(-38+Math.cos(sa)*17,Math.sin(sa)*17); ctx.stroke();
-    }
-    ctx.restore();
-
-    // Poeira
-    ctx.save();
-    for (var pi=0;pi<18;pi++) {
-      var pA=((t*0.65+pi*0.14)%1.4);
-      var px2=tx-75-pA*55+Math.sin(pi*2.3)*18, py2=ty-pA*28+Math.cos(pi*1.7)*9;
-      ctx.globalAlpha=(1-pA/1.4)*0.32; ctx.fillStyle='#d4b870';
-      ctx.beginPath(); ctx.arc(px2,py2,5+pA*9,0,Math.PI*2); ctx.fill();
-    }
-    ctx.restore();
-
-    var cards=[
-      {text:'CULTIVE.',   x:0.22, s:0.6, e:3.2},
-      {text:'CONSTRUA.',  x:0.50, s:2.2, e:5.2},
-      {text:'CONQUISTE.', x:0.78, s:3.8, e:7}
-    ];
-    cards.forEach(function(c) {
-      var ta=Math.min(1,Math.max(0,(t-c.s)*1.8))*(1-Math.max(0,(t-c.e)*2));
-      if(ta>0) _text(c.text,W*c.x,H*0.22,ta,34,'#f5c518',true);
-    });
-    _letterbox();
-  }
-
-  /* =========================================================
-     CENA 4: PERSONAGENS
-  ========================================================= */
-  function _sceneCharacters(t, dur) {
-    var bg=ctx.createRadialGradient(W/2,H/2,0,W/2,H/2,W*0.75);
-    bg.addColorStop(0,'#1a3a10'); bg.addColorStop(1,'#060e03');
-    ctx.fillStyle=bg; ctx.fillRect(0,0,W,H);
-
-    var chars=[
-      {name:'Seu Juca',  role:'Fazendeiro',          color:'#e8a830',x:0.14,d:0},
-      {name:'Marina',    role:'Engenheira Agrônoma',  color:'#5dde80',x:0.31,d:0.5},
-      {name:'Seu Pedro', role:'Pesquisador',          color:'#60aaff',x:0.50,d:1.0},
-      {name:'Dona Célia',role:'Agricultora',          color:'#ff90a0',x:0.69,d:1.5},
-      {name:'Ana',       role:'Repórter',             color:'#ffe060',x:0.86,d:2.0}
-    ];
-
-    chars.forEach(function(ch) {
-      var cp=Math.min(1,Math.max(0,(t-ch.d)/0.7));
-      if(cp<=0) return;
-      var cx=W*ch.x, cy=H*0.52;
-
-      var spot=ctx.createRadialGradient(cx,cy,0,cx,cy,145);
-      spot.addColorStop(0,'rgba('+_hrgb(ch.color)+','+cp*0.22+')');
-      spot.addColorStop(0.55,'rgba('+_hrgb(ch.color)+','+cp*0.07+')');
-      spot.addColorStop(1,'rgba(0,0,0,0)');
-      ctx.fillStyle=spot; ctx.beginPath(); ctx.arc(cx,cy,145,0,Math.PI*2); ctx.fill();
-
-      var slideY=(1-cp)*H*0.28;
-      ctx.save(); ctx.translate(cx,cy+slideY); ctx.globalAlpha=cp;
-      _chibi(ctx, ch.color, 0, 0, 58+cp*4);
-      ctx.restore();
-
-      if(cp>0.5) {
-        var ta=(cp-0.5)*2;
-        ctx.save(); ctx.globalAlpha=ta;
-        ctx.fillStyle=ch.color; ctx.font='bold 14px sans-serif'; ctx.textAlign='center';
-        ctx.fillText(ch.name,cx,cy+85+slideY);
-        ctx.fillStyle='rgba(255,255,255,0.55)'; ctx.font='11px sans-serif';
-        ctx.fillText(ch.role,cx,cy+100+slideY);
-        ctx.restore();
-      }
-    });
-
-    _text('CONHEÇA SEU TIME', W/2, H*0.1, Math.min(1,t*2)*(1-Math.max(0,(t-5)*3)), 28,'#fff',true);
-    _letterbox();
-  }
-
-  /* =========================================================
-     CENA 5: MISSÕES — flash rápido
-  ========================================================= */
-  function _sceneMissions(t, dur) {
-    var missions=[
-      {title:'CHEGADA À FAZENDA',       color:'#4a9c20',bg:'#091808',icon:'🌱'},
-      {title:'PRAGAS NOTURNAS',         color:'#4040cc',bg:'#050515',icon:'🔦'},
-      {title:'INTERCEPTAR AGROTÓXICOS', color:'#dd3030',bg:'#1a0505',icon:'⚡'},
-      {title:'AMOSTRAS TÓXICAS',        color:'#cc8800',bg:'#180e00',icon:'🧪'},
-      {title:'PLANTIO DE REMEDIAÇÃO',   color:'#20aa40',bg:'#041208',icon:'🌿'},
-      {title:'INSPEÇÃO COM DRONE',      color:'#2080cc',bg:'#040c14',icon:'🚁'}
-    ];
-    var seg=dur/missions.length;
-    var mi=Math.min(missions.length-1,Math.floor(t/seg));
-    var m=missions[mi];
-    var mp=(t-mi*seg)/seg;
-
-    // Flash ao trocar
-    if(mp<0.18) {
-      ctx.fillStyle='#ffffff'; ctx.globalAlpha=1-mp/0.18;
-      ctx.fillRect(0,0,W,H); ctx.globalAlpha=1;
-    }
-
-    ctx.fillStyle=m.bg; ctx.fillRect(0,0,W,H);
-
-    ctx.save(); ctx.globalAlpha=0.07; ctx.strokeStyle=m.color; ctx.lineWidth=28;
-    for(var si=0;si<22;si++){ctx.beginPath();ctx.moveTo(si*110-500,0);ctx.lineTo(si*110+200,H);ctx.stroke();}
-    ctx.restore();
-
-    var na=Math.min(1,(mp-0.18)*5);
-    ctx.save(); ctx.globalAlpha=na*0.1;
-    ctx.font='bold 380px sans-serif'; ctx.fillStyle=m.color; ctx.textAlign='center';
-    ctx.fillText(''+(mi+1),W/2+20,H*0.74); ctx.restore();
-
-    ctx.save(); ctx.globalAlpha=na;
-    ctx.font=(78+(1-mp)*18)+'px sans-serif'; ctx.textAlign='center';
-    ctx.fillText(m.icon,W*0.2,H*0.56); ctx.restore();
-
-    if(mp>0.22) {
-      var ta=Math.min(1,(mp-0.22)*3);
-      var slX=(1-ta)*55;
-      ctx.save(); ctx.globalAlpha=ta;
-      ctx.fillStyle=m.color; ctx.font='bold 36px sans-serif'; ctx.textAlign='center';
-      ctx.fillText('MISSÃO '+(mi+1),W/2+slX,H*0.42);
-      ctx.fillStyle='#fff'; ctx.font='21px sans-serif';
-      ctx.fillText(m.title,W/2+slX,H*0.50); ctx.restore();
-    }
-
-    ctx.save();
-    for(var di=0;di<missions.length;di++){
-      var dot=di===mi;
-      ctx.globalAlpha=dot?1:0.28;
-      ctx.fillStyle=dot?m.color:'#fff';
-      ctx.beginPath(); ctx.arc(W/2+(di-missions.length/2+0.5)*22,H*0.88,dot?6:4,0,Math.PI*2); ctx.fill();
-    }
-    ctx.restore();
-    _letterbox();
-  }
-
-  /* =========================================================
-     CENA 6: TÍTULO ÉPICO
-  ========================================================= */
-  function _sceneEpicTitle(t, dur) {
-    var prog=t/dur;
-
-    var bg=ctx.createLinearGradient(0,0,0,H);
-    bg.addColorStop(0,'#040d02'); bg.addColorStop(0.45,'#091a06'); bg.addColorStop(1,'#152e0a');
-    ctx.fillStyle=bg; ctx.fillRect(0,0,W,H);
-
-    // Fileiras de lavoura no fundo
-    ctx.save();
-    for(var r=0;r<32;r++){
-      var rF=r/31, ry=H*0.64+rF*H*0.36;
-      var rW=W*(0.08+rF*0.92);
-      ctx.globalAlpha=0.28*(1-rF);
-      ctx.fillStyle=r%2===0?'#3a7810':'#2a5c08';
-      ctx.fillRect((W-rW)/2,ry,rW,H*0.011);
-    }
-    ctx.restore();
-
-    // Coluna de luz central
-    var cg=ctx.createLinearGradient(W/2-180,0,W/2+180,0);
-    cg.addColorStop(0,'rgba(0,0,0,0)');
-    cg.addColorStop(0.5,'rgba(70,170,35,0.07)');
-    cg.addColorStop(1,'rgba(0,0,0,0)');
-    ctx.fillStyle=cg; ctx.fillRect(0,0,W,H);
-
-    // Explosão de partículas (início)
-    if(t<2.2){
-      var bp=t/2.2; ctx.save();
-      for(var pi=0;pi<65;pi++){
-        var pa=(pi/65)*Math.PI*2;
-        var pr=bp*(130+Math.sin(pi*7.3)*75);
-        var px2=W/2+Math.cos(pa)*pr, py2=H*0.40+Math.sin(pa)*pr*0.55;
-        ctx.globalAlpha=(1-bp)*0.75;
-        ctx.fillStyle=pi%3===0?'#f5c518':pi%3===1?'#4db86a':'#ffffff';
-        ctx.beginPath(); ctx.arc(px2,py2,1.8+Math.sin(pi)*1.2,0,Math.PI*2); ctx.fill();
-      }
-      ctx.restore();
-    }
-
-    // Logo principal
-    var la=Math.min(1,t*1.8), ls=0.55+_easeOut(Math.min(1,t*2.2))*0.45;
-    ctx.save(); ctx.globalAlpha=la; ctx.translate(W/2,H*0.37); ctx.scale(ls,ls);
-
-    // Sombra
-    ctx.fillStyle='rgba(0,0,0,0.55)'; ctx.font='bold 90px sans-serif'; ctx.textAlign='center';
-    ctx.fillText('AGRO FORTE',4,4);
-
-    // Gradiente do logo
-    var tg=ctx.createLinearGradient(-310,-42,310,42);
-    tg.addColorStop(0,  '#4db86a'); tg.addColorStop(0.4,'#7de89a');
-    tg.addColorStop(0.5,'#f5c518'); tg.addColorStop(0.6,'#e8a820');
-    tg.addColorStop(1,  '#4db86a');
-    ctx.fillStyle=tg; ctx.fillText('AGRO FORTE',0,0);
-
-    // Brilho varrendo
-    var shX=((t*0.38)%1.6-0.3)*680;
-    var shg=ctx.createLinearGradient(shX-65,0,shX+65,0);
-    shg.addColorStop(0,'rgba(255,255,255,0)');
-    shg.addColorStop(0.5,'rgba(255,255,255,0.22)');
-    shg.addColorStop(1,'rgba(255,255,255,0)');
-    ctx.fillStyle=shg; ctx.fillText('AGRO FORTE',0,0);
-    ctx.restore();
-
-    // Subtítulo
-    if(t>0.9){
-      var sta=Math.min(1,(t-0.9)*1.6);
-      ctx.save(); ctx.globalAlpha=sta*0.65;
-      ctx.fillStyle='#fff'; ctx.font='15px sans-serif'; ctx.textAlign='center';
-      ctx.fillText('JOGO AGRINHO 2026 — Subcategoria 3 — HTML/CSS/JS',W/2,H*0.37+64);
-      ctx.restore();
-    }
-
-    // Selo Agrinho
-    if(t>1.6){
-      var ba=Math.min(1,(t-1.6)*2.2);
-      ctx.save(); ctx.globalAlpha=ba; ctx.translate(W/2,H*0.535);
-      var bgr=ctx.createRadialGradient(0,0,18,0,0,56);
-      bgr.addColorStop(0,'#1a8c38'); bgr.addColorStop(1,'#0a4e1e');
-      ctx.fillStyle=bgr; ctx.beginPath(); ctx.arc(0,0,56,0,Math.PI*2); ctx.fill();
-      ctx.strokeStyle='#f5c518'; ctx.lineWidth=3; ctx.stroke();
-      ctx.fillStyle='#f5c518'; ctx.font='bold 11px sans-serif'; ctx.textAlign='center';
-      ctx.fillText('AGRINHO',0,-7); ctx.fillText('2026',0,8);
-      ctx.font='20px sans-serif'; ctx.fillText('🌾',0,28);
-      ctx.restore();
-    }
-
-    // Personagens
-    if(t>2.2){
-      var ca=Math.min(1,(t-2.2)*1.6);
-      var colors=['#e8a830','#5dde80','#60aaff','#ff90a0','#ffe060'];
-      colors.forEach(function(col,ci){
-        var cx=W*(0.27+ci*0.115), cy=H*0.80;
-        var su=(1-Math.min(1,(t-2.2-ci*0.12)*2.2))*38;
-        ctx.save(); ctx.globalAlpha=ca;
-        ctx.translate(cx,cy+su); _chibi(ctx,col,0,0,38); ctx.restore();
-      });
-    }
-
-    // CTA
-    if(t>3.2){
-      var cta=Math.min(1,(t-3.2)*2), pulse=1+Math.sin(t*2.8)*0.035;
-      ctx.save(); ctx.globalAlpha=cta; ctx.translate(W/2,H*0.935); ctx.scale(pulse,pulse);
-      var bW=228,bH=50;
-      var bg2=ctx.createLinearGradient(-bW/2,-bH/2,bW/2,bH/2);
-      bg2.addColorStop(0,'#2d8c45'); bg2.addColorStop(1,'#1a5c2a');
-      ctx.fillStyle=bg2;
-      _rrect(ctx,-bW/2,-bH/2,bW,bH,25);
-      ctx.strokeStyle='#4db86a'; ctx.lineWidth=2; ctx.stroke();
-      ctx.fillStyle='#fff'; ctx.font='bold 18px sans-serif'; ctx.textAlign='center';
-      ctx.fillText('▶  JOGAR AGORA',0,7);
-      ctx.restore();
-    }
-    _letterbox();
-  }
-
-  /* =========================================================
-     UTILITÁRIOS
-  ========================================================= */
-  function _tractorSil(x,y,scale){
-    ctx.save(); ctx.translate(x,y); ctx.scale(scale,scale);
-    ctx.fillStyle='rgba(0,0,0,0.82)';
-    ctx.fillRect(-54,-42,80,38); ctx.fillRect(-30,-58,38,20);
-    ctx.beginPath(); ctx.arc(-35,0,19,0,Math.PI*2); ctx.fill();
-    ctx.beginPath(); ctx.arc(22,0,13,0,Math.PI*2); ctx.fill();
-    ctx.restore();
-  }
-
-  function _chibi(c2, color, x, y, s){
-    c2.fillStyle='#f0c090';
-    c2.beginPath(); c2.arc(x,y-s*0.72,s*0.27,0,Math.PI*2); c2.fill();
-    c2.fillStyle=color;
-    c2.beginPath(); c2.arc(x,y-s*0.82,s*0.25,Math.PI,Math.PI*2); c2.fill();
-    c2.fillRect(x-s*0.30,y-s*0.82,s*0.60,s*0.06);
-    c2.fillRect(x-s*0.20,y-s*0.44,s*0.40,s*0.40);
-    c2.fillStyle='#3a3060';
-    c2.fillRect(x-s*0.18,y-s*0.04,s*0.16,s*0.28);
-    c2.fillRect(x+s*0.02,y-s*0.04,s*0.16,s*0.28);
-    c2.fillStyle='#1a1010';
-    c2.fillRect(x-s*0.22,y+s*0.22,s*0.20,s*0.10);
-    c2.fillRect(x+s*0.02,y+s*0.22,s*0.20,s*0.10);
-    c2.fillStyle=color;
-    c2.fillRect(x-s*0.38,y-s*0.40,s*0.17,s*0.30);
-    c2.fillRect(x+s*0.21,y-s*0.40,s*0.17,s*0.30);
-    c2.fillStyle='#200808';
-    c2.beginPath(); c2.arc(x-s*0.10,y-s*0.74,s*0.038,0,Math.PI*2); c2.fill();
-    c2.beginPath(); c2.arc(x+s*0.10,y-s*0.74,s*0.038,0,Math.PI*2); c2.fill();
-    c2.strokeStyle='#9a4020'; c2.lineWidth=1.4;
-    c2.beginPath(); c2.arc(x,y-s*0.665,s*0.09,0.18,Math.PI-0.18); c2.stroke();
-  }
-
-  function _text(txt,x,y,a,sz,col,shadow){
-    ctx.save(); ctx.globalAlpha=a;
-    if(shadow){ctx.fillStyle='rgba(0,0,0,0.65)';ctx.font='bold '+sz+'px sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(txt,x+2,y+2);}
-    ctx.fillStyle=col; ctx.font='bold '+sz+'px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
-    ctx.fillText(txt,x,y); ctx.restore();
-  }
-
-  function _letterbox(){
-    var lb=Math.floor(H*0.075);
-    ctx.fillStyle='#000';
-    ctx.fillRect(0,0,W,lb);
-    ctx.fillRect(0,H-lb,W,lb);
-  }
-
-  function _rrect(c,x,y,w,h,r){
-    c.beginPath(); c.moveTo(x+r,y);
-    c.lineTo(x+w-r,y); c.quadraticCurveTo(x+w,y,x+w,y+r);
-    c.lineTo(x+w,y+h-r); c.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
-    c.lineTo(x+r,y+h); c.quadraticCurveTo(x,y+h,x,y+h-r);
-    c.lineTo(x,y+r); c.quadraticCurveTo(x,y,x+r,y);
-    c.closePath(); c.fill();
-  }
-
-  function _lerpColor(c1,c2,t){
-    var r1=parseInt(c1.slice(1,3),16),g1=parseInt(c1.slice(3,5),16),b1=parseInt(c1.slice(5,7),16);
-    var r2=parseInt(c2.slice(1,3),16),g2=parseInt(c2.slice(3,5),16),b2=parseInt(c2.slice(5,7),16);
-    return 'rgb('+Math.round(r1+(r2-r1)*t)+','+Math.round(g1+(g2-g1)*t)+','+Math.round(b1+(b2-b1)*t)+')';
-  }
-
-  function _hrgb(hex){
-    return parseInt(hex.slice(1,3),16)+','+parseInt(hex.slice(3,5),16)+','+parseInt(hex.slice(5,7),16);
-  }
-
-  function _easeInOut(t){return t<0.5?2*t*t:1-2*(1-t)*(1-t);}
-  function _easeOut(t){return 1-(1-t)*(1-t);}
-
-  /* =========================================================
-     MÚSICA PROCEDURAL — Folk / Rural
-  ========================================================= */
-  function _startMusic(){
-    try{audioCtx=new(window.AudioContext||window.webkitAudioContext)();}catch(e){return;}
-    var master=audioCtx.createGain();
-    master.gain.setValueAtTime(0,audioCtx.currentTime);
-    master.gain.linearRampToValueAtTime(0.65,audioCtx.currentTime+2.8);
-    master.gain.setValueAtTime(0.65,audioCtx.currentTime+DURATION-3.5);
-    master.gain.linearRampToValueAtTime(0,audioCtx.currentTime+DURATION);
-    master.connect(audioCtx.destination);
-    audioNodes.push(master);
-
-    var rev=_reverb(audioCtx,2.0);
-    var BPM=74, beat=60/BPM;
-    var t0=audioCtx.currentTime+1.2;
-
-    // Melodia — Ré maior pentatônico
-    var scale=[293.66,329.63,369.99,415.30,440,493.88,554.37,587.33];
-    var mel=[5,3,2,0,3,5,6,5,3,2,0,2,3,5,6,5,3,2,0,3,2,0,5,3,2,0];
-    var durs=[1,.5,.5,1,.5,.5,1,1,.5,.5,1,.5,.5,1,.5,.5,1,.5,1,.5,.5,1,1,.5,.5,2];
-    var mv=audioCtx.createGain(); mv.gain.value=0.17; mv.connect(rev); mv.connect(master);
-
-    for(var rep=0;rep<3;rep++){
-      var mt=t0+rep*beat*18;
-      for(var ni=0;ni<mel.length;ni++){
-        var o=audioCtx.createOscillator(); o.type='triangle';
-        o.frequency.value=scale[mel[ni]];
-        var g=audioCtx.createGain();
-        g.gain.setValueAtTime(0,mt); g.gain.linearRampToValueAtTime(0.75,mt+0.045);
-        g.gain.exponentialRampToValueAtTime(0.001,mt+durs[ni]*beat*0.88);
-        o.connect(g); g.connect(mv); o.start(mt); o.stop(mt+durs[ni]*beat);
-        mt+=durs[ni]*beat; audioNodes.push(o);
-      }
-    }
-
-    // Baixo
-    var bass=[146.83,164.81,185,220,146.83,146.83,164.81,185];
-    var bv=audioCtx.createGain(); bv.gain.value=0.13; bv.connect(master);
-    for(var rep2=0;rep2<6;rep2++){
-      for(var bi=0;bi<bass.length;bi++){
-        var bt=t0+rep2*beat*8+bi*beat;
-        var bo=audioCtx.createOscillator(); bo.type='sine'; bo.frequency.value=bass[bi];
-        var bg=audioCtx.createGain();
-        bg.gain.setValueAtTime(0,bt); bg.gain.linearRampToValueAtTime(0.55,bt+0.06);
-        bg.gain.exponentialRampToValueAtTime(0.001,bt+beat*0.78);
-        bo.connect(bg); bg.connect(bv); bo.start(bt); bo.stop(bt+beat); audioNodes.push(bo);
-      }
-    }
-
-    // Acordes pad
-    var chords=[[293.66,369.99,440],[329.63,415.30,493.88],[369.99,440,554.37],[293.66,369.99,440]];
-    var pv=audioCtx.createGain(); pv.gain.value=0.055; pv.connect(rev);
-    for(var ci=0;ci<chords.length*5;ci++){
-      chords[ci%chords.length].forEach(function(freq){
-        var ct=t0+ci*beat*4;
-        var co=audioCtx.createOscillator(); co.type='sawtooth'; co.frequency.value=freq;
-        var cg=audioCtx.createGain();
-        cg.gain.setValueAtTime(0,ct); cg.gain.linearRampToValueAtTime(0.25,ct+0.35);
-        cg.gain.setValueAtTime(0.25,ct+beat*3.4); cg.gain.linearRampToValueAtTime(0,ct+beat*4);
-        co.connect(cg); cg.connect(pv); co.start(ct); co.stop(ct+beat*4); audioNodes.push(co);
-      });
-    }
-
-    // Percussão
-    var beats=Math.floor(DURATION/beat);
-    for(var pi=0;pi<beats;pi++){
-      var pt=t0+pi*beat;
-      if(pi%4===0||pi%4===2){
-        var kBuf=audioCtx.createBuffer(1,Math.floor(audioCtx.sampleRate*0.25),audioCtx.sampleRate);
-        var kd=kBuf.getChannelData(0);
-        for(var ki=0;ki<kd.length;ki++) kd[ki]=Math.sin(ki*80*Math.PI*2/audioCtx.sampleRate)*Math.exp(-ki*25/audioCtx.sampleRate);
-        var ks=audioCtx.createBufferSource(); ks.buffer=kBuf;
-        var kg=audioCtx.createGain(); kg.gain.value=0.22;
-        ks.connect(kg); kg.connect(master); ks.start(pt); audioNodes.push(ks);
-      }
-      var hBuf=audioCtx.createBuffer(1,Math.floor(audioCtx.sampleRate*0.045),audioCtx.sampleRate);
-      var hd=hBuf.getChannelData(0);
-      for(var hi=0;hi<hd.length;hi++) hd[hi]=(Math.random()*2-1)*Math.exp(-hi*55/audioCtx.sampleRate);
-      var hs=audioCtx.createBufferSource(); hs.buffer=hBuf;
-      var hg=audioCtx.createGain(); hg.gain.value=0.07;
-      hs.connect(hg); hg.connect(master); hs.start(pt); audioNodes.push(hs);
-    }
-  }
-
-  function _reverb(ac,dur){
-    var len=Math.floor(ac.sampleRate*dur);
-    var buf=ac.createBuffer(2,len,ac.sampleRate);
-    for(var ch=0;ch<2;ch++){var d=buf.getChannelData(ch);for(var i=0;i<len;i++) d[i]=(Math.random()*2-1)*Math.pow(1-i/len,2);}
-    var cv=ac.createConvolver(); cv.buffer=buf;
-    var g=ac.createGain(); g.gain.value=0.22; cv.connect(g); g.connect(ac.destination); return cv;
-  }
-})();
-
-                  /* ============================================================
-   AGRO FORTE - Motor de Raycasting FPS com Terreno
-   Relevo real, fileiras de plantação, céu volumétrico
-   ============================================================ */
-
-var Engine = (function() {
-
-  var canvas, ctx, W, H;
-  var player = { x:4.5, y:4.5, angle:0, z:0 };
-  var running = false, crouching = false;
-  var keys = {};
-  var mouseDX = 0, mouseSens = 0.003, locked = false;
-  var animFrame = null, lastTime = 0;
-  var onInteract = null, onBoundary = null;
-  var nearObject = null, nearVehicle = null, inVehicle = false;
-  var bobTimer = 0, bobY = 0;
-
-  // World
-  var MAP_W = 64, MAP_H = 64;
-  var wallMap = [];    // 0=open, 1..N=wall type
-  var heightMap = [];  // 0..1 floor height (for hills)
-  var cropMap = [];    // crop type per cell
-  var objects = [];    // interactive objects
-  var spriteList = []; // trees, NPCs, vehicles
-
-  var missionTimer = -1, timerCb = null;
-  var renderQuality = 1; // ray step: 1=high, 2=med, 3=low
-  var fogStart = 6, fogEnd = 18;
-  var timeOfDay = 0.65; // 0=midnight, 1=noon
-  var weather = 'clear';
-  var cloudOffsetX = 0;
-
-  // Textures
-  var TEX = {}, TEX_DATA = {};
-
-  // ============================================================
-  function init(c, opts) {
-    canvas = c; ctx = c.getContext('2d');
-    opts = opts || {};
-    onInteract  = opts.onInteract  || function(){};
-    onBoundary  = opts.onBoundary  || function(){};
-    renderQuality = opts.quality === 'high' ? 1 : opts.quality === 'low' ? 3 : 2;
-    mouseSens = (opts.mouseSens || 5) * 0.00055;
-    _buildTextures();
-    _bindInput();
-    resize();
-    window.addEventListener('resize', resize);
-  }
-
-  function resize() {
-    W = canvas.width  = canvas.offsetWidth  || 800;
-    H = canvas.height = canvas.offsetHeight || 600;
-  }
-
-  // ============================================================
-  // TEXTURE GENERATION (procedural 64x64)
-  // ============================================================
-  function _buildTextures() {
-    var defs = {
-      wall:  _texBrick,
-      barn:  _texBarn,
-      wood:  _texWood,
-      fence: _texFence,
-      grain: _texGrain,
-      silo:  _texSilo,
-      floor_grass: _texGrass,
-      floor_dirt:  _texDirt,
-      floor_crop:  _texCrop
-    };
-    Object.keys(defs).forEach(function(k) {
-      var tc = document.createElement('canvas'); tc.width = tc.height = 64;
-      var tcx = tc.getContext('2d'); defs[k](tcx); TEX[k] = tc;
-      TEX_DATA[k] = tcx.getImageData(0, 0, 64, 64).data;
-    });
-  }
-  function _texBrick(c) {
-    c.fillStyle='#c4a060'; c.fillRect(0,0,64,64);
-    for(var row=0;row<9;row++) { var off=(row%2)*17;
-      for(var col=-1;col<5;col++) {
-        c.fillStyle='#a07040'; c.fillRect(col*17+off+1,row*8+1,15,6);
-        c.fillStyle='#d4b070'; c.fillRect(col*17+off+2,row*8+2,12,3);
-      }
-    }
-  }
-  function _texBarn(c) {
-    c.fillStyle='#9a1810'; c.fillRect(0,0,64,64);
-    for(var i=0;i<8;i++){c.fillStyle=i%2?'#7a1008':'#b03020'; c.fillRect(0,i*8,64,5);}
-    c.fillStyle='#fff5'; c.fillRect(28,0,8,64);
-  }
-  function _texWood(c) {
-    c.fillStyle='#7a5030'; c.fillRect(0,0,64,64);
-    for(var i=0;i<9;i++){c.fillStyle='rgba(0,0,0,0.12)'; c.fillRect(0,i*7,64,2);}
-    c.fillStyle='rgba(255,255,255,0.06)'; c.fillRect(4,0,3,64);
-  }
-  function _texFence(c) {
-    c.fillStyle='#8a6030'; c.fillRect(0,0,64,64);
-    c.fillStyle='#6a4020';
-    for(var i=0;i<4;i++) c.fillRect(i*18,0,7,64);
-    c.fillRect(0,14,64,6); c.fillRect(0,40,64,6);
-  }
-  function _texGrain(c) {
-    c.fillStyle='#d4b050'; c.fillRect(0,0,64,64);
-    c.fillStyle='#b09030';
-    for(var i=0;i<10;i++) for(var j=0;j<10;j++) if((i+j)%2) c.fillRect(i*7,j*7,6,6);
-  }
-  function _texSilo(c) {
-    var g=c.createLinearGradient(0,0,64,0);
-    g.addColorStop(0,'#888'); g.addColorStop(0.5,'#ccc'); g.addColorStop(1,'#888');
-    c.fillStyle=g; c.fillRect(0,0,64,64);
-    c.fillStyle='rgba(0,0,0,0.15)';
-    for(var i=0;i<8;i++) c.fillRect(0,i*8,64,1);
-  }
-  function _texGrass(c) {
-    c.fillStyle='#3a7020'; c.fillRect(0,0,64,64);
-    for(var i=0;i<60;i++) {
-      c.fillStyle=Math.random()>.5?'#2a6010':'#4a8030';
-      var x=Math.random()*62,y=Math.random()*62;
-      c.fillRect(x,y,2,4); c.fillRect(x+1,y-2,1,3);
-    }
-  }
-  function _texDirt(c) {
-    c.fillStyle='#7a5030'; c.fillRect(0,0,64,64);
-    for(var i=0;i<30;i++){c.fillStyle='rgba(0,0,0,0.1)'; c.beginPath(); c.arc(Math.random()*64,Math.random()*64,Math.random()*4+1,0,Math.PI*2); c.fill();}
-  }
-  function _texCrop(c) {
-    c.fillStyle='#5a7a20'; c.fillRect(0,0,64,64);
-    c.fillStyle='#3a5a10';
-    for(var i=0;i<5;i++) c.fillRect(i*14,0,4,64);
-    c.fillStyle='#8aa030';
-    for(var i=0;i<5;i++) for(var j=0;j<8;j++) c.fillRect(i*14+1,j*9,2,7);
-  }
-
-  // ============================================================
-  // MAP GENERATION WITH TERRAIN
-  // ============================================================
-  function generateMap(missionId) {
-    wallMap=[]; heightMap=[]; cropMap=[]; objects=[]; spriteList=[];
-    // Init flat
-    for(var y=0;y<MAP_H;y++){
-      wallMap[y]=[]; heightMap[y]=[]; cropMap[y]=[];
-      for(var x=0;x<MAP_W;x++){
-        wallMap[y][x]  = (x===0||y===0||x===MAP_W-1||y===MAP_H-1) ? 1 : 0;
-        heightMap[y][x] = 0;
-        cropMap[y][x]  = 0;
-      }
-    }
-
-    // ---- TERRAIN HILLS via smooth noise ----
-    _generateHills();
-
-    // ---- MISSION LAYOUT ----
-    var configs = {
-      1:  {timeOfDay:.65, weather:'clear',  fn:_map1  },
-      2:  {timeOfDay:.02, weather:'fog',    fn:_map2  },
-      3:  {timeOfDay:.55, weather:'clear',  fn:_map3  },
-      4:  {timeOfDay:.45, weather:'rain',   fn:_map4  },
-      5:  {timeOfDay:.6,  weather:'clear',  fn:_map5  },
-      6:  {timeOfDay:.75, weather:'clear',  fn:_map6  },
-      7:  {timeOfDay:.5,  weather:'clear',  fn:_map7  },
-      8:  {timeOfDay:.6,  weather:'clear',  fn:_map8  },
-      9:  {timeOfDay:.7,  weather:'clear',  fn:_map9  },
-      10: {timeOfDay:.65, weather:'clear',  fn:_map10 }
-    };
-    var cfg = configs[missionId] || configs[1];
-    timeOfDay = cfg.timeOfDay; weather = cfg.weather;
-    cfg.fn();
-
-    // ---- TREES scattered (avoid walls and objects) ----
-    _scatterTrees(20 + missionId * 2);
-
-    // Reset player
-    player.x=4.5; player.y=4.5; player.angle=0; player.z=0;
-    inVehicle=false; missionTimer=-1;
-  }
-
-  // Smooth hill generation — 4-octave noise, stronger amplitude
-  function _generateHills() {
-    var sc = 0.10;
-    for(var y=1;y<MAP_H-1;y++) {
-      for(var x=1;x<MAP_W-1;x++) {
-        var nx=x*sc, ny=y*sc;
-        // 4 octaves for varied terrain
-        var v = Math.sin(nx*1.1)*Math.cos(ny*0.85)*0.50 +
-                Math.sin(nx*2.6+0.7)*Math.cos(ny*2.0)*0.28 +
-                Math.sin(nx*5.0+1.3)*Math.cos(ny*4.5)*0.14 +
-                Math.sin(nx*10.2+2.1)*Math.cos(ny*9.3)*0.08;
-        // Ridged: push peaks higher
-        var n = (v+1)*0.5; // 0..1
-        // Sharpen with power curve for more dramatic hills
-        heightMap[y][x] = Math.pow(n, 0.7);
-      }
-    }
-  }
-
-  // Add a rectangle of crop rows
-  function _cropField(x0, y0, w, h, cropType) {
-    for(var y=y0;y<y0+h;y++) {
-      for(var x=x0;x<x0+w;x++) {
-        if(x>0&&y>0&&x<MAP_W-1&&y<MAP_H-1&&wallMap[y][x]===0) {
-          cropMap[y][x] = cropType; // 1=corn,2=soy,3=wheat,4=coffee,5=cotton
-        }
-      }
-    }
-  }
-
-  function _building(x,y,w,h,texId) {
-    for(var dy=0;dy<h;dy++) for(var dx=0;dx<w;dx++) {
-      if(dy===0||dy===h-1||dx===0||dx===w-1) {
-        if(dy===h-1&&dx>0&&dx<w-1) continue; // entrance gap
-        if(x+dx>0&&y+dy>0&&x+dx<MAP_W-1&&y+dy<MAP_H-1)
-          wallMap[y+dy][x+dx]=texId;
-      }
-    }
-  }
-
-  function _fence(x,y,len,dir) {
-    for(var i=0;i<len;i++) {
-      var fx=x+(dir===0?i:0), fy=y+(dir===1?i:0);
-      if(fx>0&&fy>0&&fx<MAP_W-1&&fy<MAP_H-1) wallMap[fy][fx]=4;
-    }
-  }
-
-  function _obj(type,x,y,id,extra) { objects.push({type:type,x:x+.5,y:y+.5,id:id,done:false,extra:extra||{}}); }
-  function _npc(charId,x,y,dir)    { spriteList.push({type:'npc',charId:charId,x:x+.5,y:y+.5,dir:dir||0}); }
-  function _vehicle(vt,x,y)        { spriteList.push({type:'vehicle',vehicleType:vt,x:x+.5,y:y+.5}); }
-
-  // ============================================================
-  // PLANTATION MAP — full farm world for FPS plantation mode
-  // ============================================================
-  function generatePlantationMap(opts) {
-    opts = opts || {};
-    wallMap=[]; heightMap=[]; cropMap=[]; objects=[]; spriteList=[];
-    var MW=48, MH=48;
-    MAP_W=MW; MAP_H=MH;
-
-    for(var y=0;y<MH;y++){
-      wallMap[y]=[]; heightMap[y]=[]; cropMap[y]=[];
-      for(var x=0;x<MW;x++){
-        wallMap[y][x]=(x===0||y===0||x===MW-1||y===MH-1)?1:0;
-        heightMap[y][x]=0;
-        cropMap[y][x]=0;
-      }
-    }
-
-    // Gentle terrain (farm land = mostly flat with slight variation)
-    var sc=0.08;
-    for(var y=1;y<MH-1;y++) for(var x=1;x<MW-1;x++){
-      var v=Math.sin(x*sc)*Math.cos(y*sc)*0.18+Math.sin(x*sc*2.3)*Math.cos(y*sc*1.7)*0.09;
-      heightMap[y][x]=Math.max(0,(v+0.3)*0.5);
-    }
-
-    // ---- Road (horizontal, y=8-9) ----
-    for(var x=0;x<MW;x++) { heightMap[8][x]=0.05; heightMap[9][x]=0.05; }
-
-    // ---- Farm fence boundary ----
-    var FX=4,FY=12,FC=14,FR=14;
-    for(var x=FX;x<=FX+FC;x++) { wallMap[FY-1][x]=4; wallMap[FY+FR][x]=4; }
-    for(var y=FY-1;y<=FY+FR;y++) { wallMap[y][FX-1]=4; wallMap[y][FX+FC+1]=4; }
-    wallMap[FY+FR][FX+FC/2]=0; wallMap[FY+FR][FX+FC/2+1]=0; // entrance
-
-    // ---- Crop fields (inside fence) ----
-    for(var r=0;r<FR;r++) for(var c=0;c<FC;c++){
-      if(opts.farmGrid&&opts.farmGrid[r]&&opts.farmGrid[r][c]){
-        var cell=opts.farmGrid[r][c];
-        if(cell.seed) cropMap[FY+r][FX+c]=(cell.seed==='corn'?1:cell.seed==='soy'?2:cell.seed==='wheat'?3:cell.seed==='coffee'?4:5);
-      }
-    }
-
-    // ---- Bus stop (east, row 8) ----
-    wallMap[7][MW-5]=5; wallMap[8][MW-5]=5; wallMap[9][MW-5]=5;
-    objects.push({type:'bus_stop',x:MW-4.5,y:8.5,id:'bus',done:false,extra:{}});
-
-    // ---- Government office (north, row 3-7) ----
-    _buildingInMap(MW-12,3,7,5,6);
-    wallMap[7][MW-10]=0; wallMap[7][MW-9]=0; // entrance
-    objects.push({type:'gov_office',x:MW-8.5,y:5.5,id:'gov',done:false,extra:{}});
-
-    // ---- Market (west, row 3-7) ----
-    _buildingInMap(2,3,7,5,2);
-    wallMap[7][5]=0; wallMap[7][6]=0;
-    objects.push({type:'market',x:5.5,y:5.5,id:'market',done:false,extra:{}});
-
-    // ---- Player house (if built, opts.buildings) ----
-    if(opts.buildings) {
-      opts.buildings.forEach(function(b){
-        _buildingInMap(b.x,b.y,b.w,b.h,b.texId||1);
-      });
-    }
-
-    // ---- Documents scattered ----
-    if(!opts.hasPermit){
-      objects.push({type:'document',x:12.5,y:20.5,id:'doc0',done:false,extra:{}});
-      objects.push({type:'document',x:30.5,y:15.5,id:'doc1',done:false,extra:{}});
-      objects.push({type:'document',x:7.5,y:30.5,id:'doc2',done:false,extra:{}});
-    }
-
-    // ---- Order board near market ----
-    objects.push({type:'order_board',x:5.5,y:8.5,id:'orders',done:false,extra:{}});
-
-    // ---- Vehicles ----
-    spriteList.push({type:'vehicle',vehicleType:'tractor',x:FX+FC/2+.5,y:FY+FR+3});
-    spriteList.push({type:'vehicle',vehicleType:'harvester',x:FX+FC/2+3.5,y:FY+FR+3});
-
-    // ---- Trees along road ----
-    for(var i=1;i<6;i++){
-      spriteList.push({type:'tree',x:i*7+.5,y:7.5});
-      spriteList.push({type:'tree',x:i*7+.5,y:10.5});
-    }
-
-    timeOfDay=0.65; weather='clear';
-    player.x=FX+FC/2+.5; player.y=FY+FR+5; player.angle=-Math.PI/2;
-    inVehicle=false;
-    return {farmX:FX, farmY:FY, farmCols:FC, farmRows:FR};
-  }
-
-  function _buildingInMap(x,y,w,h,texId){
-    for(var dy=0;dy<h;dy++) for(var dx=0;dx<w;dx++){
-      if(dy===0||dy===h-1||dx===0||dx===w-1){
-        if(dy===h-1&&dx>0&&dx<w-1) continue;
-        if(x+dx>0&&y+dy>0&&x+dx<MAP_W-1&&y+dy<MAP_H-1) wallMap[y+dy][x+dx]=texId;
-      }
-    }
-  }
-
-  // ---- MISSION MAPS ----
-  function _map1() { // Chegada
-    _building(8,6,8,6,1); _building(20,5,14,10,2); // casa+celeiro
-    _fence(5,15,35,0); _fence(5,15,20,1); _fence(40,15,20,1); _fence(5,35,35,0);
-    _cropField(6,17,15,12,1); // milho
-    _cropField(22,17,15,12,3); // trigo
-    for(var i=0;i<5;i++) _obj('soil', 8+i*4, 20, i);
-    _npc('juca',12,9,0); _npc('marina',10,16,0);
-    _vehicle('tractor',20,12);
-    player.x=6; player.y=17;
-  }
-  function _map2() { // Pragas noturno
-    _cropField(8,8,30,20,3); // trigo
-    for(var i=0;i<8;i++){
-      _obj('pest', 10+Math.floor(i*3.8), 10+Math.floor(i*2.5), i);
-    }
-    _npc('pedro',10,8,0);
-    player.x=6; player.y=6;
-  }
-  function _map3() { // Agrotóxicos
-    // Estrada
-    for(var i=0;i<50;i++) { wallMap[10][6+i]=0; wallMap[11][6+i]=0; }
-    _building(30,13,10,8,1);
-    _cropField(8,15,20,15,2); // soja
-    for(var i=0;i<5;i++) _obj('bomb', 10+i*9, 10, i);
-    _vehicle('truck',7,10); _npc('tonho',8,13,0);
-    missionTimer=240;
-    player.x=5; player.y=10;
-  }
-  function _map4() { // Amostras / rain
-    _cropField(10,10,25,20,2);
-    for(var i=0;i<6;i++) _obj('sample', 12+i*4, 14+i%3*5, i);
-    for(var i=0;i<5;i++) { // puddles — marcados diferente (avoid=true)
-      var po = {type:'puddle',x:15+i*3+.5,y:20+i%2*3+.5,id:100+i,done:false,extra:{avoid:true}};
-      objects.push(po);
-    }
-    _npc('marina',11,9,0); _npc('lena',13,9,1);
-    player.x=6; player.y=8;
-  }
-  function _map5() { // Plantio remediação
-    _cropField(6,10,30,20,4); // café — campo para plantar
-    for(var i=0;i<7;i++) _obj('plant_spot', 8+i*4, 14+(i%2)*4, i);
-    _vehicle('planter',6,12); _npc('lena',6,10,0); _npc('joao',8,10,0);
-    player.x=4; player.y=10;
-  }
-  function _map6() { // Drone
-    _cropField(5,5,50,50,1);
-    _obj('drone_start',20,20,0);
-    for(var i=0;i<5;i++){
-      var a=(i/5)*Math.PI*2;
-      _obj('certify_point', Math.round(25+Math.cos(a)*12), Math.round(25+Math.sin(a)*12), i+1);
-    }
-    _npc('drCosta',20,22,0);
-    player.x=18; player.y=18;
-  }
-  function _map7() { // Nascentes
-    // Riachos
-    for(var j=0;j<3;j++) {
-      var sy=18+j*10;
-      for(var i=10;i<40;i++) { wallMap[sy][i]=5; wallMap[sy+1][i]=5; }
-      _obj('spring',14+j*12,sy,j);
-    }
-    _cropField(5,5,40,12,3);
-    _npc('pedro',15,15,0);
-    player.x=6; player.y=8;
-  }
-  function _map8() { // Compostagem
-    _building(8,6,6,6,2); _building(40,28,8,8,1);
-    _cropField(6,15,30,15,5); // algodão
-    for(var i=0;i<8;i++) _obj('waste', 10+i*4+Math.floor(i/2)*2, 18+(i%3)*4, i);
-    _obj('compost_site',44,32,99);
-    _vehicle('tractor',8,15); _npc('dona',9,8,0); _npc('biu',12,8,0);
-    player.x=6; player.y=12;
-  }
-  function _map9() { // Joaninhas
-    _cropField(5,5,50,50,2);
-    for(var i=0;i<10;i++){
-      var a=(i/10)*Math.PI*2, r=18;
-      _obj('bug_point', Math.round(28+Math.cos(a)*r), Math.round(28+Math.sin(a)*r), i);
-    }
-    _npc('pedro',28,28,0); _npc('lena',30,28,0);
-    player.x=26; player.y=26;
-  }
-  function _map10() { // Feira
-    _building(5,5,10,8,1); // armazém
-    for(var i=0;i<5;i++) _building(18+i*9,12,7,6,3); // tendas
-    _cropField(5,16,55,25,3);
-    _obj('products',8,8,0);
-    _obj('fair_gate',48,22,1);
-    _vehicle('truck',6,12);
-    _npc('ana',22,18,0); _npc('clara',28,18,0); _npc('juca',6,7,0);
-    player.x=4; player.y=10;
-  }
-
-  function _scatterTrees(n) {
-    var tried=0;
-    while(n>0&&tried<500) {
-      tried++;
-      var tx=2+Math.floor(Math.random()*(MAP_W-4));
-      var ty=2+Math.floor(Math.random()*(MAP_H-4));
-      if(wallMap[ty][tx]!==0) continue;
-      if(_nearObj(tx+.5,ty+.5,3)) continue;
-      spriteList.push({type:'tree',x:tx+.5,y:ty+.5,size:0.8+Math.random()*0.4});
-      n--;
-    }
-  }
-
-  function _nearObj(x,y,r) {
-    for(var i=0;i<objects.length;i++){
-      var o=objects[i];
-      if(Math.hypot(o.x-x,o.y-y)<r) return true;
-    }
-    for(var i=0;i<spriteList.length;i++){
-      var s=spriteList[i];
-      if(Math.hypot(s.x-x,s.y-y)<r) return true;
-    }
-    if(Math.hypot(player.x-x,player.y-y)<r) return true;
-    return false;
-  }
-
-  // ============================================================
-  // RENDER
-  // ============================================================
-  function render(dt) {
-    if(!ctx||!W||!H) return;
-    ctx.clearRect(0,0,W,H);
-    cloudOffsetX += dt * 8;
-
-    _renderSkyAndGround(dt);
-    _renderWalls();
-    _renderSprites();
-    _renderWeather();
-    _renderVignette();
-  }
-
-  // ---- SKY + TERRAIN FLOOR ----
-  function _renderSkyAndGround() {
-    // Sky gradient based on time of day
-    var skyTop    = _skyColor(timeOfDay, 0);
-    var skyHoriz  = _skyColor(timeOfDay, 0.5);
-    var skyGrad = ctx.createLinearGradient(0,0,0,H/2);
-    skyGrad.addColorStop(0,   skyTop);
-    skyGrad.addColorStop(1,   skyHoriz);
-    ctx.fillStyle = skyGrad;
-    ctx.fillRect(0,0,W,H/2);
-
-    // Mountains / horizon hills silhouette
-    _renderHorizonHills();
-
-    // Sun or Moon
-    _renderCelestial();
-
-    // Clouds
-    _renderClouds();
-
-    // GROUND — voxel-space terrain renderer (real 3D relief)
-    _renderVoxelGround();
-  }
-
-  function _skyColor(t, frac) {
-    // t: 0=midnight, 0.25=dawn, 0.5=morning, 0.75=noon, 1=dusk
-    var night   = [5,5,20];
-    var dawn    = [200,90,40];
-    var morning = [135,200,235];
-    var noon    = [80,160,240];
-    var dusk    = [220,100,50];
-
-    var r,g,b;
-    if(t<0.25){ var p=t/0.25; r=_lerp(night[0],dawn[0],p); g=_lerp(night[1],dawn[1],p); b=_lerp(night[2],dawn[2],p); }
-    else if(t<0.5){ var p=(t-.25)/.25; r=_lerp(dawn[0],morning[0],p); g=_lerp(dawn[1],morning[1],p); b=_lerp(dawn[2],morning[2],p); }
-    else if(t<0.75){ var p=(t-.5)/.25; r=_lerp(morning[0],noon[0],p); g=_lerp(morning[1],noon[1],p); b=_lerp(morning[2],noon[2],p); }
-    else{ var p=(t-.75)/.25; r=_lerp(noon[0],dusk[0],p); g=_lerp(noon[1],dusk[1],p); b=_lerp(noon[2],dusk[2],p); }
-
-    var dark = 1 - Math.max(0, (timeOfDay < 0.2 ? 1 - timeOfDay*5 : 0));
-    r*=dark; g*=dark; b*=dark;
-    r = _lerp(r, r*0.7+frac*40, frac);
-    return 'rgb('+Math.round(r)+','+Math.round(g)+','+Math.round(b)+')';
-  }
-
-  function _lerp(a,b,t){ return a+(b-a)*t; }
-
-  function _renderHorizonHills() {
-    var horizY = H * 0.5;
-    var a = player.angle;
-    var night = timeOfDay < 0.3;
-
-    // Layer 3: far dark mountains
-    ctx.fillStyle = night ? 'rgb(3,7,3)' : 'rgb(12,28,8)';
-    ctx.beginPath(); ctx.moveTo(0,H);
-    for(var x=0;x<=W;x+=10){
-      var h2=Math.sin(x*.008+a*1.7)*28+Math.sin(x*.019+.9)*16+Math.sin(x*.004+a)*10;
-      ctx.lineTo(x, horizY-h2);
-    }
-    ctx.lineTo(W,H); ctx.closePath(); ctx.fill();
-
-    // Layer 2: mid rolling hills
-    ctx.fillStyle = night ? 'rgb(7,18,5)' : 'rgb(20,55,14)';
-    ctx.beginPath(); ctx.moveTo(0,H);
-    for(var x=0;x<=W;x+=8){
-      var h2=Math.sin(x*.013+a*2.1)*22+Math.sin(x*.031+1.4)*14+Math.sin(x*.006+a*1.5)*20;
-      ctx.lineTo(x, horizY+8-h2);
-    }
-    ctx.lineTo(W,H); ctx.closePath(); ctx.fill();
-
-    // Layer 1: near terrain — samples actual heightmap in player's FOV
-    ctx.fillStyle = night ? 'rgb(10,25,7)' : 'rgb(32,80,20)';
-    ctx.beginPath(); ctx.moveTo(0,H);
-    for(var x=0;x<=W;x+=5){
-      var rayA = a - 0.52 + (x/W)*1.04;
-      var dist = 5;
-      var tx=Math.floor(player.x+Math.cos(rayA)*dist);
-      var ty=Math.floor(player.y+Math.sin(rayA)*dist);
-      var terrH=(tx>=0&&ty>=0&&tx<MAP_W&&ty<MAP_H)?(heightMap[ty][tx]||0)*36:0;
-      var wave=Math.sin(x*.021+a*2.4)*14+Math.sin(x*.049+2.1)*9;
-      ctx.lineTo(x, horizY+16-wave-terrH*.7);
-    }
-    ctx.lineTo(W,H); ctx.closePath(); ctx.fill();
-
-    // Very near bright grass strip at base
-    ctx.fillStyle = night ? 'rgb(14,32,9)' : 'rgb(42,95,24)';
-    ctx.beginPath(); ctx.moveTo(0,H);
-    for(var x=0;x<=W;x+=4){
-      var rayA=a-0.52+(x/W)*1.04;
-      var tx2=Math.floor(player.x+Math.cos(rayA)*2.5);
-      var ty2=Math.floor(player.y+Math.sin(rayA)*2.5);
-      var th2=(tx2>=0&&ty2>=0&&tx2<MAP_W&&ty2<MAP_H)?(heightMap[ty2][tx2]||0)*48:0;
-      var w2=Math.sin(x*.035+a*3)*10+Math.sin(x*.07)*6;
-      ctx.lineTo(x, horizY+28-w2-th2*.8);
-    }
-    ctx.lineTo(W,H); ctx.closePath(); ctx.fill();
-  }
-
-  function _renderCelestial() {
-    var t = timeOfDay;
-    if(t > 0.2 && t < 0.9) {
-      // Sun
-      var sunX = W*(t-0.2)/0.7;
-      var sunY = H*0.4 - Math.sin((t-0.2)/0.7*Math.PI)*H*0.38;
-      var grad = ctx.createRadialGradient(sunX,sunY,0,sunX,sunY,50);
-      grad.addColorStop(0,'rgba(255,255,180,1)');
-      grad.addColorStop(0.25,'rgba(255,220,80,0.7)');
-      grad.addColorStop(1,'rgba(255,140,0,0)');
-      ctx.fillStyle=grad; ctx.beginPath(); ctx.arc(sunX,sunY,50,0,Math.PI*2); ctx.fill();
-      ctx.fillStyle='#ffffa0'; ctx.beginPath(); ctx.arc(sunX,sunY,14,0,Math.PI*2); ctx.fill();
-    } else {
-      // Moon
-      var moonX = W*.2, moonY = H*.12;
-      ctx.fillStyle='#dde8f0'; ctx.beginPath(); ctx.arc(moonX,moonY,14,0,Math.PI*2); ctx.fill();
-      // Stars
-      ctx.fillStyle='#ffffff';
-      for(var i=0;i<60;i++){
-        var sx=(Math.sin(i*91.7)*0.5+0.5)*W, sy=(Math.sin(i*47.3)*0.5+0.5)*H*0.45;
-        var ss=Math.abs(Math.sin(i*13.7))*1.5+0.5;
-        var alpha=Math.abs(Math.sin(Date.now()*0.001+i))*0.5+0.5;
-        ctx.globalAlpha=alpha; ctx.beginPath(); ctx.arc(sx,sy,ss,0,Math.PI*2); ctx.fill();
-      }
-      ctx.globalAlpha=1;
-    }
-  }
-
-  function _renderClouds() {
-    if(timeOfDay < 0.2) return;
-    var clouds = [
-      {x:0.12,y:0.08,w:90,h:35},
-      {x:0.4,y:0.04,w:120,h:40},
-      {x:0.68,y:0.10,w:80,h:30},
-      {x:0.85,y:0.06,w:100,h:38}
-    ];
-    ctx.save();
-    clouds.forEach(function(cl) {
-      var cx = ((cl.x*W + cloudOffsetX) % (W+200)) - 100;
-      var cy = cl.y * H;
-      ctx.globalAlpha = weather==='rain'||weather==='storm' ? 0.6 : 0.45;
-      ctx.fillStyle = weather==='rain' ? '#778' : '#fff';
-      _drawCloud(cx, cy, cl.w, cl.h);
-    });
-    ctx.restore();
-  }
-
-  function _drawCloud(cx,cy,w,h) {
-    ctx.beginPath();
-    ctx.ellipse(cx,cy,w*0.5,h*0.5,0,0,Math.PI*2); ctx.fill();
-    ctx.beginPath(); ctx.ellipse(cx-w*0.25,cy+h*0.1,w*0.35,h*0.4,0,0,Math.PI*2); ctx.fill();
-    ctx.beginPath(); ctx.ellipse(cx+w*0.25,cy+h*0.1,w*0.35,h*0.4,0,0,Math.PI*2); ctx.fill();
-    ctx.beginPath(); ctx.ellipse(cx+w*0.1,cy-h*0.15,w*0.28,h*0.35,0,0,Math.PI*2); ctx.fill();
-  }
-
-  // VOXEL SPACE terrain renderer — true 3D hills (Comanche-style)
-  function _renderVoxelGround() {
-    var halfH  = Math.floor(H/2);
-    var step   = Math.max(1, renderQuality);
-    var FOV    = 1.0472, halfFOV = FOV/2;
-    var lightF = Math.max(0.1, Math.min(1, timeOfDay<0.3?timeOfDay/0.3:timeOfDay>0.85?(1-timeOfDay)/0.15:1));
-    var night  = timeOfDay < 0.25 || timeOfDay > 0.88;
-
-    var baseR = night?10:22, baseG = night?18:40, baseB = night?6:14;
-    ctx.fillStyle = 'rgb('+baseR+','+baseG+','+baseB+')';
-    ctx.fillRect(0, halfH, W, halfH);
-
-    var distSteps = renderQuality > 1 ? 50 : 70;
-
-    for (var col = 0; col < W; col += step) {
-      var angle = player.angle - halfFOV + (col/W)*FOV;
-      var cosA  = Math.cos(angle), sinA = Math.sin(angle);
-      var maxY  = H;
-
-      for (var di = distSteps; di >= 1; di--) {
-        var fd = di * 0.20;
-        var wx = player.x + cosA*fd;
-        var wy = player.y + sinA*fd;
-        var mi = Math.floor(wx) & (MAP_W-1);
-        var mj = Math.floor(wy) & (MAP_H-1);
-        var terrH = (heightMap[mj]&&heightMap[mj][mi]!==undefined) ? heightMap[mj][mi] : 0;
-        var cropT = (cropMap[mj]&&cropMap[mj][mi]) ? cropMap[mj][mi] : 0;
-
-        var screenY = Math.floor(halfH + (0.5 - terrH*0.92)*H*0.80/fd);
-        if (screenY >= maxY) continue;
-
-        var fog = Math.min(1, Math.max(0,(fd-fogStart)/(fogEnd-fogStart)));
-        var r, g, b;
-        if (cropT > 0) {
-          var cpairs=[[40,95,20],[55,110,25],[165,130,18],[28,72,14],[220,215,180],[52,100,22]];
-          var cc=cpairs[(cropT-1)%6]; r=cc[0]; g=cc[1]; b=cc[2];
-        } else if (terrH > 0.80) { r=90; g=82; b=62; }   // rocky peak
-        else if (terrH > 0.62) { r=52; g=112; b=30; }    // upper slopes
-        else if (terrH > 0.42) { r=40; g=90; b=24; }     // mid slopes
-        else if (terrH > 0.22) { r=32; g=72; b=18; }     // lower slopes
-        else { r=24; g=56; b=14; }                        // valley
-
-        // Slope shading (N-S gradient approximation)
-        if (mj>0&&mj<MAP_H-1&&heightMap[mj+1]&&heightMap[mj-1]) {
-          var slope=(heightMap[mj+1][mi]||terrH)-(heightMap[mj-1][mi]||terrH);
-          var sl=1+slope*1.6;
-          r=Math.round(r*sl); g=Math.round(g*sl); b=Math.round(b*sl);
-        }
-
-        r=Math.round(r*lightF*(1-fog)+baseR*fog);
-        g=Math.round(g*lightF*(1-fog)+baseG*fog);
-        b=Math.round(b*lightF*(1-fog)+baseB*fog);
-
-        ctx.fillStyle='rgb('+Math.max(0,Math.min(255,r))+','+Math.max(0,Math.min(255,g))+','+Math.max(0,Math.min(255,b))+')';
-        ctx.fillRect(col, screenY, step, maxY-screenY);
-        maxY = screenY;
-        if (maxY <= halfH) break;
-      }
-    }
-
-    _renderCropRows();
-  }
-
-  // 3D crop plant sprites — drawn as perspective-projected billboards
-  function _renderCropRows() {
-    var px=player.x, py=player.y;
-    var maxDist=6.5;
-    var lightF=Math.max(0.1,Math.min(1,timeOfDay<0.3?timeOfDay/0.3:timeOfDay>0.85?(1-timeOfDay)/0.15:1));
-
-    // Collect visible crop cells near player
-    var batch=[];
-    var r0=Math.max(1,Math.floor(px-maxDist)), r1=Math.min(MAP_W-2,Math.floor(px+maxDist));
-    var c0=Math.max(1,Math.floor(py-maxDist)), c1=Math.min(MAP_H-2,Math.floor(py+maxDist));
-    for(var cy=c0;cy<=c1;cy++){
-      for(var cx=r0;cx<=r1;cx++){
-        if(!cropMap[cy]||!cropMap[cy][cx]) continue;
-        var ct=cropMap[cy][cx];
-        // 3 plants per crop cell in a row
-        for(var pi=0;pi<3;pi++){
-          var wx=cx+0.18+pi*0.32, wy=cy+0.5+Math.sin(cx*5.1+cy*3.7+pi)*0.15;
-          var d2=(wx-px)*(wx-px)+(wy-py)*(wy-py);
-          if(d2>maxDist*maxDist) continue;
-          batch.push({wx:wx,wy:wy,ct:ct,d2:d2});
-        }
-      }
-    }
-    // Back to front for proper painter's order
-    batch.sort(function(a,b){return b.d2-a.d2;});
-
-    batch.forEach(function(sp){
-      var proj=_projectSpriteAt(sp.wx,sp.wy);
-      if(!proj) return;
-      var dist=Math.sqrt(sp.d2);
-      var fog=Math.min(1,Math.max(0,(dist-fogStart)/(fogEnd-fogStart)));
-      var sprH=Math.min(H*.38, H*0.14/Math.max(0.25,proj.tz));
-      if(sprH<3) return;
-      ctx.save();
-      ctx.globalAlpha=Math.max(0,(1-fog)*lightF*.9);
-      _drawCropPlantAt(ctx, sp.ct, proj.sx, H/2+bobY, sprH);
-      ctx.restore();
-    });
-  }
-
-  // Project world point to screen using sprite transform
-  function _projectSpriteAt(wx,wy){
-    var dx=wx-player.x, dy=wy-player.y;
-    var ca=Math.cos(player.angle), sa=Math.sin(player.angle);
-    var plX=-sa, plY=ca;
-    var invDet=1/(plX*ca-plY*sa); // always 1
-    var tx=invDet*(ca*dx+sa*dy);
-    var tz=invDet*(plX*(-dy)+plY*dx); // transform y = depth
-    // Re-derive properly
-    var tranX= plY*dx-plX*dy;
-    var tranZ=-sa*dx+ca*dy;
-    if(tranZ<=0.15) return null;
-    var sx=Math.floor((W/2)*(1+tranX/tranZ));
-    if(sx<-60||sx>W+60) return null;
-    return {sx:sx, tz:tranZ};
-  }
-
-  // Draw a single crop plant billboard at screen coords
-  function _drawCropPlantAt(ctx2, cropType, sx, groundY, h){
-    if(h<3) return;
-    var cols={
-      1:['#4daa1f','#7acc40','#e8c820'], // corn: green + yellow cob
-      2:['#6aa03a','#9acc60','#7acc40'], // soy
-      3:['#c8a820','#e8c830','#d4a018'], // wheat: golden
-      4:['#2a5a12','#4a8a22','#3a6a18'], // coffee: dark green
-      5:['#c8c498','#e8e4b8','#f0f0d8'], // cotton: white/cream
-      6:['#5a9a30','#7ab850','#50881a']  // default
-    };
-    var c=cols[cropType]||cols[6];
-
-    // Stem
-    ctx2.strokeStyle=c[0]; ctx2.lineWidth=Math.max(1,h*.07); ctx2.lineCap='round';
-    ctx2.beginPath();
-    ctx2.moveTo(sx, groundY);
-    ctx2.bezierCurveTo(sx+h*.04, groundY-h*.38, sx-h*.04, groundY-h*.72, sx, groundY-h);
-    ctx2.stroke();
-
-    // Two leaves
-    ctx2.fillStyle=c[0];
-    ctx2.beginPath(); ctx2.ellipse(sx+h*.12, groundY-h*.38, h*.14, h*.046, -0.38, 0, Math.PI*2); ctx2.fill();
-    ctx2.beginPath(); ctx2.ellipse(sx-h*.10, groundY-h*.65, h*.12, h*.040, 0.38, 0, Math.PI*2); ctx2.fill();
-
-    // Crop-specific top
-    if(cropType===1){ // corn cob
-      ctx2.fillStyle=c[2];
-      ctx2.beginPath(); ctx2.ellipse(sx, groundY-h*1.05, h*.055, h*.17, 0.08, 0, Math.PI*2); ctx2.fill();
-      ctx2.strokeStyle=c[2]; ctx2.lineWidth=1; ctx2.beginPath();
-      ctx2.moveTo(sx-h*.06, groundY-h*.95); ctx2.lineTo(sx+h*.06, groundY-h*.95); ctx2.stroke();
-    } else if(cropType===3){ // wheat ear
-      ctx2.fillStyle=c[2];
-      ctx2.beginPath(); ctx2.ellipse(sx, groundY-h*1.06, h*.036, h*.20, 0, 0, Math.PI*2); ctx2.fill();
-      ctx2.strokeStyle=c[2]; ctx2.lineWidth=.8;
-      for(var si=-2;si<=2;si++){
-        ctx2.beginPath(); ctx2.moveTo(sx,groundY-h*.92-si*h*.035);
-        ctx2.lineTo(sx+h*.07*(si%2?-1:1), groundY-h*.90-si*h*.038); ctx2.stroke();
-      }
-    } else if(cropType===5){ // cotton boll
-      ctx2.fillStyle=c[2]; ctx2.lineWidth=.8;
-      ctx2.beginPath(); ctx2.arc(sx, groundY-h, h*.10, 0, Math.PI*2); ctx2.fill();
-      ctx2.fillStyle='rgba(255,255,240,0.7)';
-      ctx2.beginPath(); ctx2.arc(sx+h*.04, groundY-h*.96, h*.06, 0, Math.PI*2); ctx2.fill();
-    } else { // default round top
-      ctx2.fillStyle=c[1];
-      ctx2.beginPath(); ctx2.arc(sx, groundY-h, h*.085, 0, Math.PI*2); ctx2.fill();
-    }
-  }
-
-  // ---- WALL CASTING ----
-  function _renderWalls() {
-    var lightF = Math.max(0.1, Math.min(1, timeOfDay<0.3?timeOfDay/0.3:timeOfDay>0.85?(1-timeOfDay)/0.15:1));
-    var FOV=1.0472, halfFOV=FOV/2;
-    var step = renderQuality;
-
-    for(var col=0; col<W; col+=step) {
-      var angle = player.angle - halfFOV + (col/W)*FOV;
-      var hit   = _castRay(angle);
-      if(!hit.hit) continue;
-      var dist  = Math.max(0.05, hit.dist);
-      var wallH = Math.min(H, H*0.75/dist);
-      var wallY = H/2 - wallH/2 + bobY;
-
-      // height-adjusted wall (taller on hills)
-      var cellH = hit.mapX>=0&&hit.mapY>=0&&hit.mapX<MAP_W&&hit.mapY<MAP_H ?
-                  (heightMap[hit.mapY]?heightMap[hit.mapY][hit.mapX]:0) : 0;
-      wallY -= cellH * 15 / Math.max(0.5, dist);
-
-      // Texture
-      var texKey = _wallTexKey(hit.cell);
-      var tex    = TEX[texKey];
-      var texX   = Math.floor(hit.wallX * 64) & 63;
-
-      if(tex) {
-        ctx.drawImage(tex, texX, 0, 1, 64, col, wallY, step, wallH);
-      }
-
-      // Shade overlay
-      var fogF   = Math.min(1, Math.max(0,(dist-fogStart)/(fogEnd-fogStart)));
-      var sideS  = hit.side ? 0.18 : 0;
-      var shade  = Math.min(0.98, fogF*0.8 + sideS + (1-lightF)*0.7);
-      ctx.fillStyle='rgba(0,0,0,'+shade.toFixed(2)+')';
-      ctx.fillRect(col, wallY, step, wallH);
-
-      // Puddle / water: blue tint
-      if(hit.cell===5) {
-        ctx.fillStyle='rgba(60,120,200,0.35)';
-        ctx.fillRect(col, wallY, step, wallH);
-      }
-    }
-  }
-
-  function _wallTexKey(cell) {
-    return {1:'wall',2:'barn',3:'wood',4:'fence',5:'wall',6:'grain',7:'silo'}[cell]||'wall';
-  }
-
-  function _castRay(angle) {
-    var rdx=Math.cos(angle), rdy=Math.sin(angle);
-    var mx=Math.floor(player.x), my=Math.floor(player.y);
-    var ddx=Math.abs(1/rdx)||1e30, ddy=Math.abs(1/rdy)||1e30;
-    var sx,sy,sdx,sdy;
-    if(rdx<0){sx=-1;sdx=(player.x-mx)*ddx;}else{sx=1;sdx=(mx+1-player.x)*ddx;}
-    if(rdy<0){sy=-1;sdy=(player.y-my)*ddy;}else{sy=1;sdy=(my+1-player.y)*ddy;}
-    var hit=false,side=0,cell=0,steps=80;
-    while(!hit&&steps-->0){
-      if(sdx<sdy){sdx+=ddx;mx+=sx;side=0;}else{sdy+=ddy;my+=sy;side=1;}
-      if(mx<0||my<0||mx>=MAP_W||my>=MAP_H){hit=true;cell=1;break;}
-      if(wallMap[my]&&wallMap[my][mx]>0){hit=true;cell=wallMap[my][mx];}
-    }
-    var dist;
-    if(side===0) dist=(mx-player.x+(1-sx)/2)/rdx;
-    else          dist=(my-player.y+(1-sy)/2)/rdy;
-    var wallX;
-    if(side===0) wallX=player.y+dist*rdy; else wallX=player.x+dist*rdx;
-    wallX-=Math.floor(wallX);
-    return {hit:hit,dist:Math.max(0,dist),cell:cell,side:side,wallX:wallX,mapX:mx,mapY:my};
-  }
-
-  // ---- SPRITES ----
-  function _renderSprites() {
-    var list = spriteList.map(function(s){
-      var dx=s.x-player.x, dy=s.y-player.y;
-      return {s:s, dist2:dx*dx+dy*dy};
-    });
-    list.sort(function(a,b){return b.dist2-a.dist2;});
-
-    var lightF=Math.max(0.1,Math.min(1,timeOfDay<0.3?timeOfDay/0.3:timeOfDay>0.85?(1-timeOfDay)/0.15:1));
-
-    list.forEach(function(item){
-      var s=item.s;
-      var dist=Math.sqrt(item.dist2);
-      if(dist>fogEnd*1.1) return;
-
-      var dx=s.x-player.x, dy=s.y-player.y;
-      var invDet=1/(Math.cos(player.angle)*Math.sin(player.angle+Math.PI/2)-Math.sin(player.angle)*Math.cos(player.angle+Math.PI/2));
-      var tx=invDet*(Math.sin(player.angle+Math.PI/2)*dx-Math.cos(player.angle+Math.PI/2)*dy);
-      var tz=invDet*(-Math.sin(player.angle)*dx+Math.cos(player.angle)*dy);
-      if(tz<=0.1) return;
-
-      var screenX=Math.floor((W/2)*(1+tx/tz));
-      var sprH=Math.min(H*2, Math.abs(Math.floor(H/tz)));
-      var sprW=sprH;
-      var sY=Math.floor(H/2-sprH/2+bobY);
-
-      ctx.save();
-      var fog=Math.min(1,Math.max(0,(dist-fogStart)/(fogEnd-fogStart)));
-      ctx.globalAlpha=Math.max(0.05, (1-fog)*lightF);
-      _drawSpriteAt(ctx, s, screenX, sY, sprW, sprH);
-      ctx.restore();
-    });
-  }
-
-  function _drawSpriteAt(ctx, sp, sx, sy, sw, sh) {
-    if(sp.type==='tree') {
-      var ts=sp.size||1;
-      // Trunk
-      ctx.fillStyle='#5a3010';
-      ctx.fillRect(sx-sw*0.07, sy+sh*0.5, sw*0.14, sh*0.5);
-      // Canopy layers (3 tiers like real trees)
-      ctx.fillStyle='#1a5a0a';
-      ctx.beginPath(); ctx.ellipse(sx,sy+sh*0.25,sw*0.45,sh*0.4,0,0,Math.PI*2); ctx.fill();
-      ctx.fillStyle='#2a7010';
-      ctx.beginPath(); ctx.ellipse(sx-sw*0.06,sy+sh*0.15,sw*0.38,sh*0.32,0,0,Math.PI*2); ctx.fill();
-      ctx.fillStyle='#3a8015';
-      ctx.beginPath(); ctx.ellipse(sx+sw*0.04,sy+sh*0.05,sw*0.25,sh*0.22,0,0,Math.PI*2); ctx.fill();
-    } else if(sp.type==='npc') {
-      // NPC silhouette drawn with canvas art
-      var scale=sh/200;
-      var tmpC=document.createElement('canvas');
-      tmpC.width=Math.ceil(sw)+20; tmpC.height=Math.ceil(sh)+10;
-      var tmpCtx=tmpC.getContext('2d');
-      var char=CHARACTERS[sp.charId];
-      if(char) drawCharacter(tmpCtx, char, tmpC.width/2, tmpC.height*0.88, scale*0.8);
-      ctx.drawImage(tmpC, sx-tmpC.width/2, sy);
-    } else if(sp.type==='vehicle') {
-      _drawVehicle(ctx, sp, sx, sy, sw, sh);
-    } else {
-      // Object marker
-      ctx.fillStyle='rgba(255,220,0,0.9)';
-      ctx.beginPath(); ctx.arc(sx,sy+sh/2,Math.max(4,sw*0.15),0,Math.PI*2); ctx.fill();
-      ctx.fillStyle='#fff';
-      ctx.font=Math.max(10,sh*0.3)+'px sans-serif'; ctx.textAlign='center';
-      var icons={soil:'📡',pest:'🔦',bomb:'💣',sample:'🧪',plant_spot:'🌱',
-        certify_point:'✅',spring:'💧',waste:'♻️',bug_point:'🐞',
-        products:'📦',fair_gate:'🎪',compost_site:'♻️',drone_start:'🚁'};
-      var obj=objects.find(function(o){return Math.hypot(o.x-sp.x,o.y-sp.y)<2});
-      if(obj){ctx.fillText(icons[obj.type]||'?',sx,sy+sh/2+6);}
-    }
-  }
-
-  function _drawVehicle(ctx, sp, sx, sy, sw, sh) {
-    if(sp.vehicleType==='tractor') {
-      ctx.fillStyle='#3a7a30'; ctx.fillRect(sx-sw*0.45,sy+sh*0.3,sw*0.9,sh*0.4);
-      ctx.fillStyle='#2a5a20'; ctx.fillRect(sx-sw*0.25,sy+sh*0.1,sw*0.5,sh*0.35);
-      ctx.fillStyle='rgba(150,220,255,0.5)'; ctx.fillRect(sx-sw*0.2,sy+sh*0.12,sw*0.4,sh*0.18);
-      ctx.fillStyle='#1a1a1a'; ctx.beginPath(); ctx.arc(sx-sw*0.28,sy+sh*0.7,sw*0.18,0,Math.PI*2); ctx.fill();
-      ctx.beginPath(); ctx.arc(sx+sw*0.28,sy+sh*0.7,sw*0.18,0,Math.PI*2); ctx.fill();
-      ctx.fillStyle='#333'; ctx.beginPath(); ctx.arc(sx-sw*0.28,sy+sh*0.7,sw*0.12,0,Math.PI*2); ctx.fill();
-      ctx.beginPath(); ctx.arc(sx+sw*0.28,sy+sh*0.7,sw*0.12,0,Math.PI*2); ctx.fill();
-    } else if(sp.vehicleType==='truck'||sp.vehicleType==='planter') {
-      ctx.fillStyle='#4a3010'; ctx.fillRect(sx-sw*0.48,sy+sh*0.25,sw*0.96,sh*0.5);
-      ctx.fillStyle='#6a4a1a'; ctx.fillRect(sx-sw*0.38,sy+sh*0.08,sw*0.4,sh*0.35);
-      ctx.fillStyle='rgba(150,220,255,0.5)'; ctx.fillRect(sx-sw*0.35,sy+sh*0.1,sw*0.35,sh*0.2);
-      ctx.fillStyle='#111';
-      ctx.beginPath(); ctx.arc(sx-sw*0.3,sy+sh*0.75,sw*0.16,0,Math.PI*2); ctx.fill();
-      ctx.beginPath(); ctx.arc(sx+sw*0.3,sy+sh*0.75,sw*0.16,0,Math.PI*2); ctx.fill();
-    }
-  }
-
-  // ---- WEATHER EFFECTS ----
-  function _renderWeather() {
-    if(weather==='rain'||weather==='storm'){
-      ctx.save(); ctx.strokeStyle='rgba(120,150,200,0.3)'; ctx.lineWidth=1;
-      var drops=weather==='storm'?150:80;
-      for(var i=0;i<drops;i++){
-        var rx=Math.random()*W, ry=Math.random()*H;
-        ctx.beginPath(); ctx.moveTo(rx,ry); ctx.lineTo(rx-2,ry+14); ctx.stroke();
-      }
-      ctx.globalAlpha=0.06; ctx.fillStyle='#4060a0'; ctx.fillRect(0,0,W,H);
-      ctx.restore();
-    }
-    if(weather==='fog'){
-      ctx.save();
-      var fg=ctx.createLinearGradient(0,H*0.35,0,H);
-      fg.addColorStop(0,'rgba(190,210,195,0)');
-      fg.addColorStop(1,'rgba(190,210,195,0.55)');
-      ctx.fillStyle=fg; ctx.fillRect(0,0,W,H); ctx.restore();
-    }
-    if(timeOfDay<0.25){
-      ctx.fillStyle='rgba(0,0,20,'+(0.25-timeOfDay)*3+')';
-      ctx.fillRect(0,0,W,H);
-    }
-  }
-
-  function _renderVignette() {
-    var vg=ctx.createRadialGradient(W/2,H/2,H*0.35,W/2,H/2,H*0.75);
-    vg.addColorStop(0,'rgba(0,0,0,0)');
-    vg.addColorStop(1,'rgba(0,0,0,0.35)');
-    ctx.fillStyle=vg; ctx.fillRect(0,0,W,H);
-  }
-
-  // ============================================================
-  // MOVEMENT & PHYSICS
-  // ============================================================
-  function _bindInput() {
-    document.addEventListener('keydown',function(e){
-      keys[e.code]=true;
-      if(e.code==='KeyE') _tryInteract();
-    });
-    document.addEventListener('keyup',function(e){keys[e.code]=false;});
-    document.addEventListener('mousemove',function(e){
-      if(locked){ player.angle+=e.movementX*mouseSens; }
-    });
-    document.addEventListener('pointerlockchange',function(){
-      locked=!!document.pointerLockElement;
-    });
-  }
-
-  function _tryInteract() {
-    if(nearVehicle&&!inVehicle){ inVehicle=true; return; }
-    if(inVehicle){ inVehicle=false; return; }
-    if(nearObject){ onInteract(nearObject); }
-  }
-
-  function update(dt) {
-    bobTimer+=dt;
-    running=keys['ShiftLeft']||keys['ShiftRight'];
-
-    // Vehicle-specific physics
-    var vType = nearVehicle ? nearVehicle.vehicleType : (inVehicle&&nearVehicle?nearVehicle.vehicleType:'');
-    var vSpeed, vTurnRate, vBob;
-    if(inVehicle) {
-      switch(vType) {
-        case 'tractor':   vSpeed=1.8; vTurnRate=0.9; vBob=0.5; break;
-        case 'car':       vSpeed=5.5; vTurnRate=2.2; vBob=3; break;
-        case 'truck':     vSpeed=2.8; vTurnRate=1.0; vBob=1; break;
-        case 'harvester': vSpeed=1.2; vTurnRate=0.6; vBob=0.3; break;
-        case 'planter':   vSpeed=1.5; vTurnRate=0.8; vBob=0.4; break;
-        default:          vSpeed=3.0; vTurnRate=1.5; vBob=1.5;
-      }
-    } else {
-      vSpeed = running?4.2:2.6; vTurnRate=2.0; vBob=running?6:3;
-    }
-
-    var speed = vSpeed * dt;
-    var moveX=0,moveY=0;
-    if(keys['KeyW']||keys['ArrowUp'])  {moveX+=Math.cos(player.angle);moveY+=Math.sin(player.angle);}
-    if(keys['KeyS']||keys['ArrowDown']){moveX-=Math.cos(player.angle);moveY-=Math.sin(player.angle);}
-    if(keys['KeyA']||keys['ArrowLeft']) player.angle-=vTurnRate*dt;
-    if(keys['KeyD']||keys['ArrowRight'])player.angle+=vTurnRate*dt;
-
-    bobY = vBob * Math.sin(bobTimer*(running?10:6));
-
-    var nx=player.x+moveX*speed, ny=player.y+moveY*speed;
-    if(nx<1||ny<1||nx>=MAP_W-1||ny>=MAP_H-1){
-      var msgs=['Hum, não é por aqui!','A fazenda acaba aqui.','Tem cerca ali!','Olha o limite da propriedade!'];
-      onBoundary(msgs[Math.floor(Date.now()/3000)%msgs.length]);
-      return;
-    }
-    // collision
-    if(wallMap[Math.floor(ny)]&&wallMap[Math.floor(ny)][Math.floor(nx)]===0){player.x=nx;player.y=ny;}
-    else if(wallMap[Math.floor(player.y)]&&wallMap[Math.floor(player.y)][Math.floor(nx)]===0){player.x=nx;}
-    else if(wallMap[Math.floor(ny)]&&wallMap[Math.floor(ny)][Math.floor(player.x)]===0){player.y=ny;}
-
-    // Near detection
-    nearObject=null; nearVehicle=null;
-    for(var i=0;i<objects.length;i++){
-      var o=objects[i]; if(o.done) continue;
-      if(Math.hypot(o.x-player.x,o.y-player.y)<1.8){nearObject=o;break;}
-    }
-    for(var j=0;j<spriteList.length;j++){
-      var s=spriteList[j]; if(s.type!=='vehicle') continue;
-      if(Math.hypot(s.x-player.x,s.y-player.y)<2.2){nearVehicle=s;break;}
-    }
-
-    if(missionTimer>0){ missionTimer-=dt; if(missionTimer<=0&&timerCb) timerCb('timeout'); }
-  }
-
-  // ============================================================
-  // PUBLIC API
-  // ============================================================
-  function start(missionId, opts) {
-    opts=opts||{};
-    if(opts.quality) renderQuality=opts.quality==='high'?1:opts.quality==='low'?3:2;
-    if(opts.mouseSens) mouseSens=opts.mouseSens*0.00055;
-    timerCb=opts.onTimerEnd||null;
-    generateMap(missionId);
-    if(animFrame) cancelAnimationFrame(animFrame);
-    lastTime=performance.now();
-    function loop(now){
-      var dt=Math.min((now-lastTime)/1000,0.05); lastTime=now;
-      update(dt); render(dt);
-      animFrame=requestAnimationFrame(loop);
-    }
-    animFrame=requestAnimationFrame(loop);
-  }
-
-  function stop(){ if(animFrame){cancelAnimationFrame(animFrame);animFrame=null;} unlockPointer(); }
-  function lockPointer(){ if(canvas) canvas.requestPointerLock(); }
-  function unlockPointer(){ if(document.pointerLockElement) document.exitPointerLock(); }
-
-  function markObjectDone(id){ for(var i=0;i<objects.length;i++) if(objects[i].id===id){objects[i].done=true;break;} }
-  function getObjectsCompleted(){ return objects.filter(function(o){return o.done&&!o.extra.avoid;}).length; }
-  function getTotalObjects(){ return objects.filter(function(o){return !o.extra.avoid;}).length; }
-  function getTimer(){ return missionTimer; }
-  function getNearObject(){ return nearObject; }
-  function getNearVehicle(){ return nearVehicle; }
-  function isInVehicle(){ return inVehicle; }
-
-  function renderMinimap(mmC) {
-    var mc=mmC.getContext('2d'), ms=120, cell=4;
-    var cols=ms/cell, rows=ms/cell;
-    mc.fillStyle='rgba(0,0,0,0.75)'; mc.fillRect(0,0,ms,ms);
-    var offX=Math.floor(player.x)-cols/2, offY=Math.floor(player.y)-rows/2;
-    for(var y=0;y<rows;y++) for(var x=0;x<cols;x++) {
-      var wx=Math.floor(offX+x), wy=Math.floor(offY+y);
-      if(wx<0||wy<0||wx>=MAP_W||wy>=MAP_H) continue;
-      var w=wallMap[wy]?wallMap[wy][wx]:0;
-      var crop=cropMap[wy]?cropMap[wy][wx]:0;
-      if(w>0) mc.fillStyle='#9a6030';
-      else if(crop>0) mc.fillStyle='rgba(80,160,30,0.7)';
-      else mc.fillStyle='rgba(40,80,20,0.4)';
-      mc.fillRect(x*cell,y*cell,cell-0.5,cell-0.5);
-    }
-    objects.forEach(function(o){
-      var sx=(o.x-offX)*cell, sy=(o.y-offY)*cell;
-      mc.fillStyle=o.done?'#4a4':'#ff0';
-      mc.beginPath(); mc.arc(sx,sy,3,0,Math.PI*2); mc.fill();
-    });
-    var px=(player.x-offX)*cell, py=(player.y-offY)*cell;
-    mc.fillStyle='#0f0'; mc.beginPath(); mc.arc(px,py,4,0,Math.PI*2); mc.fill();
-    mc.strokeStyle='#0f0'; mc.lineWidth=2;
-    mc.beginPath(); mc.moveTo(px,py);
-    mc.lineTo(px+Math.cos(player.angle)*10,py+Math.sin(player.angle)*10); mc.stroke();
-  }
-
-  return {
-    init:init, start:start, stop:stop, resize:resize,
-    lockPointer:lockPointer, unlockPointer:unlockPointer,
-    generateMap:generateMap,
-    generatePlantationMap:generatePlantationMap,
-    markObjectDone:markObjectDone,
-    getObjectsCompleted:getObjectsCompleted,
-    getTotalObjects:getTotalObjects,
-    getTimer:getTimer, getNearObject:getNearObject,
-    getNearVehicle:getNearVehicle, isInVehicle:isInVehicle,
-    renderMinimap:renderMinimap,
-    setQuality:function(q){renderQuality=q==='high'?1:q==='low'?3:2;},
-    setMouseSens:function(s){mouseSens=s*0.00055;},
-    getPlayer:function(){ return {x:player.x,y:player.y,angle:player.angle}; }
-  };
-})();
+  var px = offsetX + ((player.x - startX) * cellSize);
+  var py = offsetY + ((player.y - startY) * cellSize);
+  fill(255, 255, 100); ellipse(px, py, cellSize * 0.8, cellSize * 0.8);
+}
+
+function desenharBracos2D() {
+  var pd = PHASE_DATA[currentPhase];
+  fill(0, 180); rect(width - 150, height - 50, 140, 40, 8);
+  fill(255, 200, 80); textSize(11); text(pd.tool, width - 140, height - 30);
+  fill(200); textSize(9); text('[E] Interagir', width - 140, height - 18);
+  if (!pointerLocked && campaignState === 'gameplay') {
+    fill(0, 140); rect(width / 2 - 105, height - 45, 210, 20, 4);
+    fill(255, 200, 80); textSize(9); text('CLIQUE para travar a câmera', width / 2, height - 35);
+  }
+}
+
+function desenharHUD2D() {
+  var pd = PHASE_DATA[currentPhase];
+  fill(0, 195); rect(0, 0, width, 48);
+  fill(175, 248, 140); textSize(12); text(pd.name + ' — ' + pd.subtitle, 14, 20);
+  fill(135, 200, 105); textSize(9); text(pd.toolTip + ' | WASD mover | E interagir', 14, 35);
+  var prog = objDone / max(objTotal, 1);
+  fill(0, 100); rect(width / 2 - 85, 10, 170, 28, 4);
+  fill(28, 100, 22); rect(width / 2 - 83, 12, 166 * prog, 24, 3);
+  fill(195, 255, 165); textSize(11); text(pd.objLabel + ': ' + objDone + ' / ' + objTotal, width / 2, 28);
+  if (phaseTimer > 0) {
+    var secs = ceil(phaseTimer / 60);
+    fill(255, 220, 80); textSize(14); text('⏱ ' + floor(secs / 60) + ':' + nf(secs % 60, 2), width - 14, 24);
+  }
+  var cx = width / 2, cy = height / 2;
+  stroke(255, 255, 255, 200); strokeWeight(1.5);
+  line(cx - 10, cy, cx - 4, cy); line(cx + 4, cy, cx + 10, cy);
+  line(cx, cy - 10, cx, cy - 4); line(cx, cy + 4, cx, cy + 10);
+  noStroke();
+  fill(0, 120); rect(width - 124, 52, 110, 13, 3);
+  fill(player.running ? color(255, 175, 0) : color(65, 195, 65)); rect(width - 122, 54, player.stamina, 9, 2);
+  fill(195, 200, 175); textSize(9); text('STAMINA', width - 14, 58);
+  fill(0, 160); rect(0, height - 26, width, 26);
+  fill(145, 195, 115); textSize(8); text('WASD/Setas mover | E interagir | ESC pausar', 14, height - 13);
+}
