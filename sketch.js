@@ -1877,6 +1877,63 @@ function executarSandbox() {
   PHASE_DATA[5].fogG = sbPD.fogG;
   PHASE_DATA[5].fogB = sbPD.fogB;
   for (var ii = 0; ii < 3; ii++) { PHASE_DATA[5].skyTop[ii] = sbPD.skyTop[ii]; PHASE_DATA[5].skyBot[ii] = sbPD.skyBot[ii]; PHASE_DATA[5].floorTop[ii] = sbPD.floorTop[ii]; PHASE_DATA[5].floorBot[ii] = sbPD.floorBot[ii]; }
+function atualizarPlayer2D() {
+  if (dialogActive) return;
+  var map2 = MAPS[currentPhase];
+  var spd = 0.12;
+  if (keyIsDown(SHIFT)) spd = 0.2;
+  if (keyIsDown(CONTROL)) spd = 0.06;
+  player.running = keyIsDown(SHIFT);
+  player.crouching = keyIsDown(CONTROL);
+  if (player.running) {
+    player.stamina = max(0, player.stamina - 0.28);
+    if (player.stamina <= 0) spd = 0.08;
+  } else player.stamina = min(100, player.stamina + 0.18);
+  
+  var dx = 0, dy = 0;
+  if (keyIsDown(87) || keyIsDown(UP_ARROW)) dy -= spd;
+  if (keyIsDown(83) || keyIsDown(DOWN_ARROW)) dy += spd;
+  if (keyIsDown(65) || keyIsDown(LEFT_ARROW)) dx -= spd;
+  if (keyIsDown(68) || keyIsDown(RIGHT_ARROW)) dx += spd;
+  
+  if (dx !== 0 || dy !== 0) {
+    player.angle = atan2(dy, dx);
+    player.moving = true;
+  } else {
+    player.moving = false;
+  }
+  
+  var nx = player.x + dx, ny = player.y + dy, r = 0.35;
+  function isWalkable(x, y) {
+    var x1 = floor(x - r), x2 = floor(x + r);
+    var y1 = floor(y - r), y2 = floor(y + r);
+    for (var iy = y1; iy <= y2; iy++) {
+      for (var ix = x1; ix <= x2; ix++) {
+        if (ix >= 0 && ix < MAPSIZE && iy >= 0 && iy < MAPSIZE && map2[iy][ix] === 1) return false;
+      }
+    }
+    return true;
+  }
+  if (isWalkable(nx, player.y)) player.x = nx;
+  if (isWalkable(player.x, ny)) player.y = ny;
+  
+  if (pointerLocked) {
+    player.angle += nativeMovX * 0.005;
+    nativeMovX = 0; nativeMovY = 0;
+  }
+  
+  if (keyIsDown(69) && !dialogActive && interactCool <= 0) {
+    verificarInteracao2D();
+    interactCool = 22;
+  }
+  if (interactCool > 0) interactCool--;
+  
+  if (player.moving) {
+    stepTimer++;
+    var rate = player.running ? 18 : 28;
+    if (stepTimer % rate === 0) playStep();
+  }
+}
   atualizarPlayer();
   atualizarNPCs();
   renderizarCena3D();
@@ -2088,7 +2145,7 @@ function desenharPlanta(x, y, stage, tipo, fc) {
 // INPUT
 // ═════════════════════════════════════════════════════════════
 function mousePressed() {
-  if (estadoTela === 0) { userStartAudio(); osciladorFundo.start(); mudarEstado(1); return; }
+  if (estadoTela === 0) { mudarEstado(1); return; }
   if (estadoTela === 4 && !trailerAtivo && !campaignActive && !sandboxActive && !plantActive) {
     var bW = 210, bH = 52, bGap = 18, totalW = 3 * bW + 2 * bGap, bX0 = (width - totalW) / 2, bY = height / 2 + 10;
     for (var i = 0; i < 3; i++) {
@@ -2252,7 +2309,6 @@ function executarGameplay() {
   if (dialogActive) desenharDialogo();
   if (pickupAnim > 0) { desenharPickupFx(); pickupAnim--; }
 }
-
 function atualizarPlayer2D() {
   if (dialogActive) return;
   var map2 = MAPS[currentPhase];
