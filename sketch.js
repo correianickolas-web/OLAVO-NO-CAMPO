@@ -1,6 +1,7 @@
 // ═════════════════════════════════════════════════════════════
 // AGRINHO 2026 — Agro forte, futuro sustentável
 // Engine 3D + Campanha + Sandbox + Plantação
+// CÓDIGO COMPLETO — SEM CORTES — FUNCIONAL
 // ═════════════════════════════════════════════════════════════
 
 // ── VARIÁVEIS DE ESTADO GLOBAL ─────────────────────────────
@@ -49,8 +50,6 @@ let pointerLocked = false;
 let nativeMovX = 0, nativeMovY = 0;
 let keys = {};
 let zBuf = new Float32Array(800);
-let cameraX2 = 0, cameraY2 = 0;
-const TAMANHO_CELULA = 28;
 let windParts = [];
 let stepTimer = 0;
 
@@ -212,8 +211,8 @@ const MAPS = [
 const MAPSIZE = 24;
 
 const PHASE_DATA = [
-{ name: 'FASE 1', subtitle: 'Escaneamento do Solo', tool: 'SCANNER', toolTip: '[E] Escanear ponto crítico', objLabel: 'Pontos escaneados', objTotal: 5, hasTimer: false, icone: '🔍',
-  skyTop: [110, 185, 248], skyBot: [65, 138, 210], floorTop: [115, 82, 38], floorBot: [72, 50, 20], wallR: 148, wallG: 108, wallB: 58, fogR: 145, fogG: 165, fogB: 190, fogDist: 14, night: false, fogDensity: 0.06 },
+  { name: 'FASE 1', subtitle: 'Escaneamento do Solo', tool: 'SCANNER', toolTip: '[E] Escanear ponto crítico', objLabel: 'Pontos escaneados', objTotal: 5, hasTimer: false,
+    skyTop: [110, 185, 248], skyBot: [65, 138, 210], floorTop: [115, 82, 38], floorBot: [72, 50, 20], wallR: 148, wallG: 108, wallB: 58, fogR: 145, fogG: 165, fogB: 190, fogDist: 14, night: false, fogDensity: 0.06 },
   { name: 'FASE 2', subtitle: 'Mapeamento Noturno de Pragas', tool: 'SCANNER NOTURNO', toolTip: '[E] Escanear praga', objLabel: 'Pragas mapeadas', objTotal: 6, hasTimer: false,
     skyTop: [8, 12, 28], skyBot: [4, 8, 20], floorTop: [18, 28, 12], floorBot: [8, 14, 5], wallR: 38, wallG: 48, wallB: 30, fogR: 12, fogG: 22, fogB: 14, fogDist: 5.5, night: true, fogDensity: 0.16 },
   { name: 'FASE 3', subtitle: 'Interrupção do Agrotóxico', tool: 'HACKEAR', toolTip: '[E] Hackear bomba ilegal', objLabel: 'Bombas desativadas', objTotal: 5, hasTimer: true, timerSec: 240,
@@ -910,23 +909,7 @@ function executarCampanha() {
     case 'ending': executarEnding(); break;
   }
 }
-function executarGameplay() {
-  atualizarPlayer2D();
-  atualizarNPCs2D();
-  if (phaseTimer > 0) phaseTimer--;
-  if (phaseTimer === 0 && !phaseWin) {
-    phaseWin = true;
-    if (currentPhase < 5) phasesUnlocked[currentPhase + 1] = true;
-    saveProgress();
-  }
-  if (phaseWin) { campaignState = 'win'; return; }
-  renderizarCena2D();
-  desenharBracos2D();
-  desenharHUD2D();
-  desenharMiniMapa();
-  if (dialogActive) desenharDialogo();
-  if (pickupAnim > 0) { desenharPickupFx(); pickupAnim--; }
-}
+
 function desenharSelecionarFase() {
   for (var y = 0; y < height; y++) { var t = y / height; stroke(lerp(12, 28, t), lerp(35, 72, t), lerp(12, 28, t)); line(0, y, width, y); }
   noStroke(); desenharSol(width * 0.82, 60, 38);
@@ -1098,159 +1081,78 @@ function desenharRetratoCompleto(key, cx, cy, alpha) {
 // ═════════════════════════════════════════════════════════════
 // GAMEPLAY — CAMPANHA
 // ═════════════════════════════════════════════════════════════
-// ============================================================
-// FUNÇÕES 2D QUE ESTAVAM FALTANDO
-// ============================================================
-
-function verificarInteracao2D() {
-  // Verifica NPCs
-  for (var i = 0; i < activeNPCs.length; i++) {
-    var npc = activeNPCs[i];
-    if (dist(player.x, player.y, npc.x, npc.y) < 2.4) {
-      dialogActive = true;
-      dialogNPC = npc;
-      dialogLine = 0;
-      npc.talking = true;
-      playDialog();
-      return;
-    }
-  }
-  // Verifica objetivos (spots)
-  for (var i = 0; i < spots.length; i++) {
-    var sp = spots[i];
-    if (!sp.done && dist(player.x, player.y, sp.x, sp.y) < 1.8) {
-      sp.done = true;
-      objDone++;
-      pickupAnim = 45;
-      playPickup();
-      if (objDone >= objTotal) {
-        phaseWin = true;
-        if (currentPhase < 5) phasesUnlocked[currentPhase + 1] = true;
-        saveProgress();
-      }
-      return;
-    }
-  }
+function executarGameplay() {
+  atualizarPlayer();
+  atualizarNPCs();
+  if (phaseTimer > 0) phaseTimer--;
+  if (phaseTimer === 0 && !phaseWin) { phaseWin = true; phasesUnlocked[min(currentPhase + 1, 5)] = true; saveProgress(); }
+  if (phaseWin) { campaignState = 'win'; return; }
+  renderizarCena3D();
+  renderizarSprites();
+  desenharVento();
+  desenharBracos();
+  desenharHUD();
+  if (dialogActive) desenharDialogo();
+  if (pickupAnim > 0) { desenharPickupFx(); pickupAnim--; }
 }
 
-function atualizarNPCs2D() {
+function atualizarNPCs() {
   for (var i = 0; i < activeNPCs.length; i++) {
     var npc = activeNPCs[i];
     npc.walkTimer++;
     if (npc.walkTimer > 80 && !npc.talking) {
-      npc.walkAngle += random(-0.2, 0.2);
-      var dx = cos(npc.walkAngle) * 0.03;
-      var dy = sin(npc.walkAngle) * 0.03;
-      var nx = npc.x + dx;
-      var ny = npc.y + dy;
+      npc.walkAngle += random(-0.3, 0.3);
+      var dx = cos(npc.walkAngle) * 0.012, dy = sin(npc.walkAngle) * 0.012;
+      var nx2 = constrain(npc.x + dx, 1, MAPSIZE - 1), ny2 = constrain(npc.y + dy, 1, MAPSIZE - 1);
       var map2 = MAPS[currentPhase];
-      var tileX = floor(nx);
-      var tileY = floor(ny);
-      if (nx > 1 && nx < MAPSIZE-1 && ny > 1 && ny < MAPSIZE-1 && map2[tileY][tileX] !== 1) {
-        npc.x = nx;
-        npc.y = ny;
-      } else {
-        npc.walkAngle += PI; // inverte direção
-      }
+      if (nx2 > 0 && nx2 < MAPSIZE && ny2 > 0 && ny2 < MAPSIZE && map2[floor(ny2)][floor(nx2)] < 1) { npc.x = nx2; npc.y = ny2; }
     }
     if (npc.walkTimer > 180) npc.walkTimer = 0;
   }
 }
 
-// Função distância (se não existir)
-if (typeof dist === 'undefined') {
-  function dist(x1, y1, x2, y2) {
-    return sqrt((x1 - x2) * (x1 - x2) + (y1 - y2) * (y1 - y2));
-  }
-}
-
-function atualizarPlayer2D() {
+function atualizarPlayer() {
   if (dialogActive) return;
   var map2 = MAPS[currentPhase];
-  var spd = 0.12;
-  if (keyIsDown(SHIFT)) spd = 0.2;
-  if (keyIsDown(CONTROL)) spd = 0.06;
-  player.running = keyIsDown(SHIFT);
-  player.crouching = keyIsDown(CONTROL);
-  if (player.running) {
-    player.stamina = max(0, player.stamina - 0.28);
-    if (player.stamina <= 0) spd = 0.08;
-  } else player.stamina = min(100, player.stamina + 0.18);
-
+  var spd = 0.048;
+  if (keys['Shift'] && !keys['Control']) spd = 0.082;
+  if (keys['Control'] && !keys['Shift']) spd = 0.025;
+  player.running = !!(keys['Shift'] && !keys['Control']);
+  player.crouching = !!(keys['Control'] && !keys['Shift']);
+  if (player.running) { player.stamina = max(0, player.stamina - 0.28); if (player.stamina <= 0) spd = 0.038; }
+  else player.stamina = min(100, player.stamina + 0.18);
   var dx = 0, dy = 0;
-  if (keyIsDown(87) || keyIsDown(UP_ARROW)) dy -= spd;   // W
-  if (keyIsDown(83) || keyIsDown(DOWN_ARROW)) dy += spd; // S
-  if (keyIsDown(65) || keyIsDown(LEFT_ARROW)) dx -= spd; // A
-  if (keyIsDown(68) || keyIsDown(RIGHT_ARROW)) dx += spd; // D
-
-  // Atualiza ângulo visual (opcional)
-  if (dx !== 0 || dy !== 0) {
-    player.angle = atan2(dy, dx);
-    player.moving = true;
-  } else {
-    player.moving = false;
-  }
-  var nx = player.x + dx, ny = player.y + dy, r = 0.35;
-  function isWalkable(x, y) {
-    var x1 = floor(x - r), x2 = floor(x + r);
-    var y1 = floor(y - r), y2 = floor(y + r);
-    for (var iy = y1; iy <= y2; iy++) {
-      for (var ix = x1; ix <= x2; ix++) {
-        if (ix >= 0 && ix < MAPSIZE && iy >= 0 && iy < MAPSIZE && map2[iy][ix] === 1) return false;
-      }
-    }
-
-function verificarInteracao2D() {
-  // Interação com NPCs
-  for (var i = 0; i < activeNPCs.length; i++) {
-    var npc = activeNPCs[i];
-    if (dist(player.x, player.y, npc.x, npc.y) < 2.4) {
-      dialogActive = true;
-      dialogNPC = npc;
-      dialogLine = 0;
-      npc.talking = true;
-      playDialog();
-      return;
-    }
-  }
-  // Interação com objetivos
-  for (var i = 0; i < spots.length; i++) {
-    var sp = spots[i];
-    if (!sp.done && dist(player.x, player.y, sp.x, sp.y) < 1.8) {
-      sp.done = true;
-      objDone++;
-      pickupAnim = 45;
-      playPickup();
-      if (objDone >= objTotal) {
-        phaseWin = true;
-        if (currentPhase < 5) phasesUnlocked[currentPhase + 1] = true;
-        saveProgress();
-      }
-      return;
-    }
-  }
-}
-    return true;
-  }
-  if (isWalkable(nx, player.y)) player.x = nx;
-  if (isWalkable(player.x, ny)) player.y = ny;
-
-  if (pointerLocked) {
-    player.angle += nativeMovX * 0.005;
-    nativeMovX = 0; nativeMovY = 0;
-  }
-
-if (keyIsDown(69) && !dialogActive && interactCool <= 0) {
-  verificarInteracao2D();
-  interactCool = 22;
-}
+  if (keys['w'] || keys['W'] || keys['ArrowUp']) { dx += cos(player.angle) * spd; dy += sin(player.angle) * spd; }
+  if (keys['s'] || keys['S'] || keys['ArrowDown']) { dx -= cos(player.angle) * spd; dy -= sin(player.angle) * spd; }
+  if (keys['a'] || keys['A']) { dx += cos(player.angle - HALF_PI) * spd * 0.72; dy += sin(player.angle - HALF_PI) * spd * 0.72; }
+  if (keys['d'] || keys['D']) { dx += cos(player.angle + HALF_PI) * spd * 0.72; dy += sin(player.angle + HALF_PI) * spd * 0.72; }
+  player.moving = (dx !== 0 || dy !== 0);
+  var nx = player.x + dx, ny = player.y + dy, r = 0.28;
+  if (isWalkable(map2, nx, player.y, r)) player.x = nx;
+  if (isWalkable(map2, player.x, ny, r)) player.y = ny;
+  if (pointerLocked) { player.angle += nativeMovX * 0.002; player.pitch = constrain(player.pitch + nativeMovY * 1.5, -80, 80); nativeMovX = 0; nativeMovY = 0; }
+  else if (mouseIsPressed && mouseButton === LEFT && estadoTela === 4 && campaignActive && campaignState === 'gameplay') { player.angle += movedX * 0.003; player.pitch = constrain(player.pitch + movedY * 1.2, -80, 80); }
+  if (keys['ArrowLeft']) player.angle -= 0.028;
+  if (keys['ArrowRight']) player.angle += 0.028;
+  if (player.moving) player.bobTime += player.running ? 0.13 : 0.085;
+  if (player.moving) { stepTimer++; var rate = player.running ? 18 : 28; if (stepTimer % rate === 0) playStep(); }
+  if ((keys['e'] || keys['E']) && !dialogActive && interactCool <= 0) { verificarInteracao(); interactCool = 22; }
   if (interactCool > 0) interactCool--;
+}
 
-  if (player.moving) {
-    stepTimer++;
-    var rate = player.running ? 18 : 28;
-    if (stepTimer % rate === 0) playStep();
+function isWalkable(map2, x, y, r) {
+  var checks = [[x + r, y + r], [x - r, y + r], [x + r, y - r], [x - r, y - r]];
+  for (var i = 0; i < checks.length; i++) {
+    var cx2 = floor(checks[i][0]), cy2 = floor(checks[i][1]);
+    if (cx2 < 0 || cx2 >= MAPSIZE || cy2 < 0 || cy2 >= MAPSIZE) return false;
+    if (map2[cy2][cx2] >= 1 && map2[cy2][cx2] !== 4 && map2[cy2][cx2] !== 7) return false;
   }
+  return true;
+}
+
+function verificarInteracao() {
+  for (var i = 0; i < activeNPCs.length; i++) { var npc = activeNPCs[i]; if (dist(player.x, player.y, npc.x, npc.y) < 2.4) { dialogActive = true; dialogNPC = npc; dialogLine = 0; npc.talking = true; playDialog(); return; } }
+  for (var i = 0; i < spots.length; i++) { var sp = spots[i]; if (!sp.done && dist(player.x, player.y, sp.x, sp.y) < 1.8) { sp.done = true; objDone++; pickupAnim = 45; playPickup(); if (objDone >= objTotal) { phaseWin = true; phasesUnlocked[min(currentPhase + 1, 5)] = true; saveProgress(); } return; } }
 }
 
 function saveProgress() { try { localStorage.setItem('agrinho2026_v8', JSON.stringify(phasesUnlocked)); } catch (e) { } }
@@ -1258,84 +1160,105 @@ function saveProgress() { try { localStorage.setItem('agrinho2026_v8', JSON.stri
 // ═════════════════════════════════════════════════════════════
 // RAYCASTING ENGINE MELHORADO
 // ═════════════════════════════════════════════════════════════
-// ── NOVA RENDERIZAÇÃO 2D ───────────────────────────────────
-function renderizarCena2D() {
-  var map2 = MAPS[currentPhase];
-  cameraX2 = player.x * TAMANHO_CELULA - width/2 + TAMANHO_CELULA/2;
-  cameraY2 = player.y * TAMANHO_CELULA - height/2 + TAMANHO_CELULA/2;
-  cameraX2 = constrain(cameraX2, 0, MAPSIZE * TAMANHO_CELULA - width);
-  cameraY2 = constrain(cameraY2, 0, MAPSIZE * TAMANHO_CELULA - height);
-  push();
-  translate(-cameraX2, -cameraY2);
-  for (var y = 0; y < MAPSIZE; y++) {
-    for (var x = 0; x < MAPSIZE; x++) {
-      var tile = map2[y][x];
-      var xp = x * TAMANHO_CELULA;
-      var yp = y * TAMANHO_CELULA;
-      if (tile === 1) { // parede
-        fill(101, 67, 33); rect(xp, yp, TAMANHO_CELULA, TAMANHO_CELULA);
-        fill(139, 90, 43); rect(xp + 4, yp + 4, TAMANHO_CELULA - 8, TAMANHO_CELULA - 8);
-      } else if (tile === 2) { // árvore
-        fill(101, 67, 33); rect(xp + 10, yp + 14, 8, 14);
-        fill(34, 139, 34); ellipse(xp + 14, yp + 10, 18, 18);
-      } else if (tile === 3) { // celeiro
-        fill(160, 80, 40); rect(xp, yp, TAMANHO_CELULA, TAMANHO_CELULA);
-        fill(200, 120, 60); rect(xp + 4, yp + 4, TAMANHO_CELULA - 8, TAMANHO_CELULA - 8);
-      } else if (tile === 4) { // milho
-        fill(80, 140, 40); rect(xp + 12, yp + 14, 4, 14);
-        fill(60, 120, 35); ellipse(xp + 14, yp + 10, 10, 12);
-      } else if (tile === 5) { // pedra
-        fill(120, 110, 100); ellipse(xp + 14, yp + 18, 18, 12);
-      } else { // chão
-        var cor = 90 + (x * 3 + y * 2) % 40;
-        fill(cor, cor - 20, cor - 50); rect(xp, yp, TAMANHO_CELULA, TAMANHO_CELULA);
-        fill(70, 50, 30, 80); ellipse(xp + 14, yp + 20, 10, 6);
-      }
-    }
-  }
-  // Spots (objetivos)
-  for (var i = 0; i < spots.length; i++) {
-    if (!spots[i].done) {
-      var xp = spots[i].x * TAMANHO_CELULA;
-      var yp = spots[i].y * TAMANHO_CELULA;
-      var pulse = 150 + sin(frameCount * 0.1) * 105;
-      fill(255, 100, 100, pulse); ellipse(xp + 14, yp + 14, 24, 24);
-      fill(255, 50, 50); ellipse(xp + 14, yp + 14, 16, 16);
-      fill(255); textSize(16); text('⭐', xp + 14, yp + 14);
-    }
-  }
-  // NPCs
-  for (var i = 0; i < activeNPCs.length; i++) {
-    var npc = activeNPCs[i];
-    var ch = CHARS[npc.charIdx];
-    var xp = npc.x * TAMANHO_CELULA;
-    var yp = npc.y * TAMANHO_CELULA;
-    fill(ch.shirtR, ch.shirtG, ch.shirtB); rect(xp + 5, yp + 10, 18, 18, 3);
-    fill(ch.skinR, ch.skinG, ch.skinB); ellipse(xp + 14, yp + 8, 14, 14);
-    if (ch.hat) { fill(ch.shirtR * 0.6, ch.shirtG * 0.6, ch.shirtB * 0.6); rect(xp + 7, yp + 2, 14, 5, 2); }
-    fill(0); ellipse(xp + 10, yp + 7, 2, 2); ellipse(xp + 18, yp + 7, 2, 2);
-    fill(255, 255, 200); textSize(7); text(ch.name, xp + 14, yp - 2);
-  }
-  // Jogador
-  var xp = player.x * TAMANHO_CELULA;
-  var yp = player.y * TAMANHO_CELULA;
-  fill(60, 120, 60); rect(xp + 5, yp + 10, 18, 18, 3);
-  fill(255, 200, 150); ellipse(xp + 14, yp + 8, 14, 14);
-  fill(101, 67, 33); rect(xp + 7, yp + 2, 14, 5, 2);
-  fill(0); ellipse(xp + 10, yp + 7, 2, 2); ellipse(xp + 18, yp + 7, 2, 2);
-  // Seta de direção
-  var ang = player.angle;
-  var dx = cos(ang) * 10, dy = sin(ang) * 10;
-  fill(255, 200, 100);
-  triangle(xp + 14 + dx, yp + 14 + dy,
-           xp + 14 + dx * 0.3 + 4, yp + 14 + dy * 0.3,
-           xp + 14 + dx * 0.3 - 4, yp + 14 + dy * 0.3);
-  pop();
-}
-
-// Mantém o nome antigo para compatibilidade
 function renderizarCena3D() {
-  renderizarCena2D();
+  var pd = PHASE_DATA[currentPhase];
+  var map2 = MAPS[currentPhase];
+  var H = height, W = width;
+  var bob = player.moving ? sin(player.bobTime) * 7 : 0;
+  var pitchOff = player.pitch;
+  var horizon = int(H / 2 + pitchOff + bob + (player.crouching ? 20 : 0));
+  var dirX = cos(player.angle), dirY = sin(player.angle);
+  var planeX = -dirY * 0.66, planeY = dirX * 0.66;
+  loadPixels();
+  for (var col = 0; col < W; col++) {
+    var camX = (col / W) * 2 - 1;
+    var rayDX = dirX + planeX * camX;
+    var rayDY = dirY + planeY * camX;
+    var mapX = floor(player.x), mapY = floor(player.y);
+    var deltaX = abs(rayDX) < 0.0001 ? 1e30 : abs(1 / rayDX);
+    var deltaY = abs(rayDY) < 0.0001 ? 1e30 : abs(1 / rayDY);
+    var stepX, stepY, sdX, sdY;
+    if (rayDX < 0) { stepX = -1; sdX = (player.x - mapX) * deltaX; } else { stepX = 1; sdX = (mapX + 1.0 - player.x) * deltaX; }
+    if (rayDY < 0) { stepY = -1; sdY = (player.y - mapY) * deltaY; } else { stepY = 1; sdY = (mapY + 1.0 - player.y) * deltaY; }
+    var hit = false, side = 0, iters = 0;
+    while (!hit && iters < 50) {
+      if (sdX < sdY) { sdX += deltaX; mapX += stepX; side = 0; } else { sdY += deltaY; mapY += stepY; side = 1; }
+      if (mapX < 0 || mapX >= MAPSIZE || mapY < 0 || mapY >= MAPSIZE) { hit = true; break; }
+      if (map2[mapY][mapX] > 0 && map2[mapY][mapX] < 7) hit = true;
+      iters++;
+    }
+    var perpDist = side === 0 ? (mapX - player.x + (1 - stepX) / 2) / rayDX : (mapY - player.y + (1 - stepY) / 2) / rayDY;
+    perpDist = max(perpDist, 0.04);
+    zBuf[col] = perpDist;
+    var wallH = min(H * 2, floor(H / perpDist));
+    var drawStart = max(0, floor(horizon - wallH / 2));
+    var drawEnd = min(H - 1, floor(horizon + wallH / 2));
+    var tile = (mapX >= 0 && mapX < MAPSIZE && mapY >= 0 && mapY < MAPSIZE) ? map2[mapY][mapX] : 1;
+    var wallX = side === 0 ? player.y + perpDist * rayDY : player.x + perpDist * rayDX;
+    wallX -= floor(wallX);
+    var texCol = floor(wallX * TEX);
+    if (stepX > 0 && side === 0) wallX = 1 - wallX;
+    if (stepY < 0 && side === 1) wallX = 1 - wallX;
+    texCol = constrain(floor(wallX * TEX), 0, TEX - 1);
+    var wr0, wg0, wb0;
+    if (tile === 2) { wr0 = 98; wg0 = 62; wb0 = 28; }
+    else if (tile === 3) { wr0 = 130; wg0 = 58; wb0 = 32; }
+    else if (tile === 4) { wr0 = 85; wg0 = 162; wb0 = 38; }
+    else if (tile === 5) { wr0 = 105; wg0 = 96; wb0 = 84; }
+    else { wr0 = pd.wallR; wg0 = pd.wallG; wb0 = pd.wallB; }
+    var sideShade = side === 1 ? 0.58 : 1.0;
+    var fogT = constrain(perpDist / pd.fogDist, 0, 1);
+    var fog2 = 1 - exp(-perpDist * pd.fogDensity);
+    var ft = max(fogT, fog2) * 0.72;
+    for (var row = 0; row < drawStart; row++) {
+      var skyT = map(row, 0, max(horizon, 1), 0, 1);
+      var sr = int(lerp(pd.skyTop[0], pd.skyBot[0], skyT));
+      var sg = int(lerp(pd.skyTop[1], pd.skyBot[1], skyT));
+      var sb = int(lerp(pd.skyTop[2], pd.skyBot[2], skyT));
+      if (!pd.night) {
+        var sunX = int(W * 0.72), sunY = int(H * 0.18 + pitchOff);
+        var sunDX = col - sunX, sunDY = row - sunY;
+        var sunDist2 = sqrt(sunDX * sunDX + sunDY * sunDY);
+        if (sunDist2 < 30) { var sunBr = 1 - sunDist2 / 30; sr = int(lerp(sr, 255, sunBr * 0.95)); sg = int(lerp(sg, 248, sunBr * 0.80)); sb = int(lerp(sb, 210, sunBr * 0.60)); }
+        else if (sunDist2 < 90) { var halo = (1 - (sunDist2 - 30) / 60) * 0.22; sr = int(min(sr + halo * 90, 255)); sg = int(min(sg + halo * 70, 255)); sb = int(min(sb + halo * 25, 255)); }
+        var rAngle = atan2(row - sunY, col - sunX);
+        var rayPulse = sin(rAngle * 18 + frameCount * 0.05) * 0.5 + 0.5;
+        if (sunDist2 > 30 && sunDist2 < 120) { var rayBr = rayPulse * (1 - (sunDist2 - 30) / 90) * 0.08; sr = int(min(sr + rayBr * 80, 255)); sg = int(min(sg + rayBr * 65, 255)); sb = int(min(sb + rayBr * 30, 255)); }
+      } else {
+        var starSeed = col * 1009 + row * 31337;
+        if ((starSeed % 180) === 0) { sr = 220; sg = 220; sb = 240; }
+        if ((starSeed % 360) === 0) { sr = 255; sg = 255; sb = 255; }
+      }
+      setPixelRGB(col, row, sr, sg, sb);
+    }
+    var wallTop = horizon - wallH / 2;
+    for (var row = drawStart; row <= drawEnd; row++) {
+      var tv = constrain((row - wallTop) / max(wallH, 1), 0, 0.9999);
+      var texRow2 = floor(tv * TEX);
+      var tv2D = getTex(tile, texCol, texRow2);
+      var shade2 = sideShade * (1.0 - abs((row - horizon) / max(wallH * 0.52, 1)) * 0.28);
+      var wr = int(wr0 * tv2D * shade2); var wg = int(wg0 * tv2D * shade2); var wb = int(wb0 * tv2D * shade2);
+      wr = int(lerp(wr, pd.fogR, ft)); wg = int(lerp(wg, pd.fogG, ft)); wb = int(lerp(wb, pd.fogB, ft));
+      setPixelRGB(col, row, wr, wg, wb);
+    }
+    for (var row = drawEnd + 1; row < H; row++) {
+      var rowRatio = (row - horizon) / max(H - horizon, 1);
+      var floorT = constrain(rowRatio * 0.88, 0, 1);
+      var fr = int(lerp(pd.floorTop[0], pd.floorBot[0], floorT));
+      var fg = int(lerp(pd.floorTop[1], pd.floorBot[1], floorT));
+      var fb = int(lerp(pd.floorTop[2], pd.floorBot[2], floorT));
+      var rowDist2 = int((H * 0.5) / max(row - horizon, 1) * 10);
+      var colTile = int(player.x * 10 + col * (rowDist2 * 0.01));
+      var rowTile = int(player.y * 10 + rowDist2);
+      var checker = ((colTile ^ rowTile) & 4) >>> 2;
+      var fn = 0.88 + checker * 0.14;
+      fr = int(fr * fn); fg = int(fg * fn); fb = int(fb * fn);
+      var flFog = min(rowRatio * 0.82, 1);
+      fr = int(lerp(fr, pd.fogR, flFog * 0.52)); fg = int(lerp(fg, pd.fogG, flFog * 0.52)); fb = int(lerp(fb, pd.fogB, flFog * 0.52));
+      setPixelRGB(col, row, fr, fg, fb);
+    }
+  }
+  updatePixels();
 }
 
 function setPixelRGB(x, y, r, g, b) {
@@ -1686,70 +1609,6 @@ function desenharPickupFx() {
   if (objDone >= objTotal && !phaseWin) { fill(255, 255, 100, alpha); textSize(20); text('FASE COMPLETA!', width / 2, height / 2 - 72 - prog * 14); }
 }
 
-function desenharMiniMapa() {
-  var map2 = MAPS[currentPhase];
-  var miniSize = 90;
-  var cellSize = miniSize / 9;
-  var offsetX = width - miniSize - 10;
-  var offsetY = 55;
-  fill(0, 180); rect(offsetX - 2, offsetY - 2, miniSize + 4, miniSize + 4, 5);
-  var startX = max(0, min(MAPSIZE - 9, floor(player.x) - 4));
-  var startY = max(0, min(MAPSIZE - 9, floor(player.y) - 4));
-  for (var i = 0; i < 9; i++) {
-    for (var j = 0; j < 9; j++) {
-      var mapX = startX + j, mapY = startY + i;
-      if (mapX < MAPSIZE && mapY < MAPSIZE) {
-        var tile = map2[mapY][mapX];
-        var cor = (tile === 1) ? color(80, 70, 50) : color(100, 80, 50);
-        fill(cor);
-        rect(offsetX + j * cellSize, offsetY + i * cellSize, cellSize, cellSize);
-      }
-    }
-  }
-  var px = offsetX + ((player.x - startX) * cellSize);
-  var py = offsetY + ((player.y - startY) * cellSize);
-  fill(255, 255, 100); ellipse(px, py, cellSize * 0.8, cellSize * 0.8);
-}
-
-function desenharBracos2D() {
-  var pd = PHASE_DATA[currentPhase];
-  fill(0, 180); rect(width - 150, height - 50, 140, 40, 8);
-  fill(255, 200, 80); textSize(11); text(pd.tool, width - 140, height - 30);
-  fill(200); textSize(9); text('[E] Interagir', width - 140, height - 18);
-  if (!pointerLocked && campaignState === 'gameplay') {
-    fill(0, 140); rect(width/2 - 105, height - 45, 210, 20, 4);
-    fill(255, 200, 80); textSize(9); text('CLIQUE para travar a câmera', width/2, height - 35);
-  }
-}
-
-function desenharHUD2D() {
-  var pd = PHASE_DATA[currentPhase];
-  fill(0, 195); rect(0, 0, width, 48);
-  fill(175, 248, 140); textSize(12); text(pd.name + ' — ' + pd.subtitle, 14, 20);
-  fill(135, 200, 105); textSize(9); text(pd.toolTip + ' | WASD mover | E interagir', 14, 35);
-  var prog = objDone / max(objTotal, 1);
-  fill(0, 100); rect(width/2 - 85, 10, 170, 28, 4);
-  fill(28, 100, 22); rect(width/2 - 83, 12, 166 * prog, 24, 3);
-  fill(195, 255, 165); textSize(11); text(pd.objLabel + ': ' + objDone + ' / ' + objTotal, width/2, 28);
-  if (phaseTimer > 0) {
-    var secs = ceil(phaseTimer / 60);
-    fill(255, 220, 80); textSize(14); text('⏱ ' + floor(secs/60) + ':' + nf(secs%60, 2), width - 14, 24);
-  }
-  // Mira simples
-  var cx = width/2, cy = height/2;
-  stroke(255, 255, 255, 200); strokeWeight(1.5);
-  line(cx - 10, cy, cx - 4, cy); line(cx + 4, cy, cx + 10, cy);
-  line(cx, cy - 10, cx, cy - 4); line(cx, cy + 4, cx, cy + 10);
-  noStroke();
-  // Stamina
-  fill(0, 120); rect(width - 124, 52, 110, 13, 3);
-  fill(player.running ? color(255, 175, 0) : color(65, 195, 65)); rect(width - 122, 54, player.stamina, 9, 2);
-  fill(195, 200, 175); textSize(9); text('STAMINA', width - 14, 58);
-  // Rodapé
-  fill(0, 160); rect(0, height - 26, width, 26);
-  fill(145, 195, 115); textSize(8); text('WASD/Setas mover | E interagir | ESC pausar', 14, height - 13);
-}
-
 // ═════════════════════════════════════════════════════════════
 // PAUSE
 // ═════════════════════════════════════════════════════════════
@@ -1877,63 +1736,6 @@ function executarSandbox() {
   PHASE_DATA[5].fogG = sbPD.fogG;
   PHASE_DATA[5].fogB = sbPD.fogB;
   for (var ii = 0; ii < 3; ii++) { PHASE_DATA[5].skyTop[ii] = sbPD.skyTop[ii]; PHASE_DATA[5].skyBot[ii] = sbPD.skyBot[ii]; PHASE_DATA[5].floorTop[ii] = sbPD.floorTop[ii]; PHASE_DATA[5].floorBot[ii] = sbPD.floorBot[ii]; }
-function atualizarPlayer2D() {
-  if (dialogActive) return;
-  var map2 = MAPS[currentPhase];
-  var spd = 0.12;
-  if (keyIsDown(SHIFT)) spd = 0.2;
-  if (keyIsDown(CONTROL)) spd = 0.06;
-  player.running = keyIsDown(SHIFT);
-  player.crouching = keyIsDown(CONTROL);
-  if (player.running) {
-    player.stamina = max(0, player.stamina - 0.28);
-    if (player.stamina <= 0) spd = 0.08;
-  } else player.stamina = min(100, player.stamina + 0.18);
-  
-  var dx = 0, dy = 0;
-  if (keyIsDown(87) || keyIsDown(UP_ARROW)) dy -= spd;
-  if (keyIsDown(83) || keyIsDown(DOWN_ARROW)) dy += spd;
-  if (keyIsDown(65) || keyIsDown(LEFT_ARROW)) dx -= spd;
-  if (keyIsDown(68) || keyIsDown(RIGHT_ARROW)) dx += spd;
-  
-  if (dx !== 0 || dy !== 0) {
-    player.angle = atan2(dy, dx);
-    player.moving = true;
-  } else {
-    player.moving = false;
-  }
-  
-  var nx = player.x + dx, ny = player.y + dy, r = 0.35;
-  function isWalkable(x, y) {
-    var x1 = floor(x - r), x2 = floor(x + r);
-    var y1 = floor(y - r), y2 = floor(y + r);
-    for (var iy = y1; iy <= y2; iy++) {
-      for (var ix = x1; ix <= x2; ix++) {
-        if (ix >= 0 && ix < MAPSIZE && iy >= 0 && iy < MAPSIZE && map2[iy][ix] === 1) return false;
-      }
-    }
-    return true;
-  }
-  if (isWalkable(nx, player.y)) player.x = nx;
-  if (isWalkable(player.x, ny)) player.y = ny;
-  
-  if (pointerLocked) {
-    player.angle += nativeMovX * 0.005;
-    nativeMovX = 0; nativeMovY = 0;
-  }
-  
-  if (keyIsDown(69) && !dialogActive && interactCool <= 0) {
-    verificarInteracao2D();
-    interactCool = 22;
-  }
-  if (interactCool > 0) interactCool--;
-  
-  if (player.moving) {
-    stepTimer++;
-    var rate = player.running ? 18 : 28;
-    if (stepTimer % rate === 0) playStep();
-  }
-}
   atualizarPlayer();
   atualizarNPCs();
   renderizarCena3D();
@@ -2145,7 +1947,7 @@ function desenharPlanta(x, y, stage, tipo, fc) {
 // INPUT
 // ═════════════════════════════════════════════════════════════
 function mousePressed() {
-  if (estadoTela === 0) { mudarEstado(1); return; }
+  if (estadoTela === 0) { userStartAudio(); osciladorFundo.start(); mudarEstado(1); return; }
   if (estadoTela === 4 && !trailerAtivo && !campaignActive && !sandboxActive && !plantActive) {
     var bW = 210, bH = 52, bGap = 18, totalW = 3 * bW + 2 * bGap, bX0 = (width - totalW) / 2, bY = height / 2 + 10;
     for (var i = 0; i < 3; i++) {
@@ -2250,9 +2052,8 @@ function keyPressed() {
   }
 }
 
-function keyReleased() {
-  keys[key] = false;
-}
+function keyReleased() { keys[key] = false; }
+
 // ═════════════════════════════════════════════════════════════
 // HELPERS
 // ═════════════════════════════════════════════════════════════
@@ -2287,266 +2088,4 @@ function desenhaTrator(x, y, esc) {
 function mudarEstado(s) {
   estadoTela = s; tempoEstado = millis();
   try { if (osciladorImpacto) { osciladorImpacto.start(); envelopeImpacto.play(osciladorImpacto); } } catch (e) { }
-}
-// ============================================================
-// BLOCO COMPLETO DAS FUNÇÕES 2D (adicione ao final do código)
-// ============================================================
-
-function executarGameplay() {
-  atualizarPlayer2D();
-  atualizarNPCs2D();
-  if (phaseTimer > 0) phaseTimer--;
-  if (phaseTimer === 0 && !phaseWin) {
-    phaseWin = true;
-    if (currentPhase < 5) phasesUnlocked[currentPhase + 1] = true;
-    saveProgress();
-  }
-  if (phaseWin) { campaignState = 'win'; return; }
-  renderizarCena2D();
-  desenharBracos2D();
-  desenharHUD2D();
-  desenharMiniMapa();
-  if (dialogActive) desenharDialogo();
-  if (pickupAnim > 0) { desenharPickupFx(); pickupAnim--; }
-}
-function atualizarPlayer2D() {
-  if (dialogActive) return;
-  var map2 = MAPS[currentPhase];
-  var spd = 0.12;
-  if (keyIsDown(SHIFT)) spd = 0.2;
-  if (keyIsDown(CONTROL)) spd = 0.06;
-  player.running = keyIsDown(SHIFT);
-  player.crouching = keyIsDown(CONTROL);
-  if (player.running) {
-    player.stamina = max(0, player.stamina - 0.28);
-    if (player.stamina <= 0) spd = 0.08;
-  } else player.stamina = min(100, player.stamina + 0.18);
-
-  var dx = 0, dy = 0;
-  if (keyIsDown(87) || keyIsDown(UP_ARROW)) dy -= spd;
-  if (keyIsDown(83) || keyIsDown(DOWN_ARROW)) dy += spd;
-  if (keyIsDown(65) || keyIsDown(LEFT_ARROW)) dx -= spd;
-  if (keyIsDown(68) || keyIsDown(RIGHT_ARROW)) dx += spd;
-
-  if (dx !== 0 || dy !== 0) {
-    player.angle = atan2(dy, dx);
-    player.moving = true;
-  } else {
-    player.moving = false;
-  }
-
-  var nx = player.x + dx, ny = player.y + dy, r = 0.35;
-  function isWalkable(x, y) {
-    var x1 = floor(x - r), x2 = floor(x + r);
-    var y1 = floor(y - r), y2 = floor(y + r);
-    for (var iy = y1; iy <= y2; iy++) {
-      for (var ix = x1; ix <= x2; ix++) {
-        if (ix >= 0 && ix < MAPSIZE && iy >= 0 && iy < MAPSIZE && map2[iy][ix] === 1) return false;
-      }
-    }
-    return true;
-  }
-  if (isWalkable(nx, player.y)) player.x = nx;
-  if (isWalkable(player.x, ny)) player.y = ny;
-
-  if (pointerLocked) {
-    player.angle += nativeMovX * 0.005;
-    nativeMovX = 0; nativeMovY = 0;
-  }
-
-  if (keyIsDown(69) && !dialogActive && interactCool <= 0) {
-    verificarInteracao2D();
-    interactCool = 22;
-  }
-  if (interactCool > 0) interactCool--;
-
-  if (player.moving) {
-    stepTimer++;
-    var rate = player.running ? 18 : 28;
-    if (stepTimer % rate === 0) playStep();
-  }
-}
-
-function atualizarNPCs2D() {
-  for (var i = 0; i < activeNPCs.length; i++) {
-    var npc = activeNPCs[i];
-    npc.walkTimer++;
-    if (npc.walkTimer > 80 && !npc.talking) {
-      npc.walkAngle += random(-0.2, 0.2);
-      var dx = cos(npc.walkAngle) * 0.03;
-      var dy = sin(npc.walkAngle) * 0.03;
-      var nx = npc.x + dx;
-      var ny = npc.y + dy;
-      var map2 = MAPS[currentPhase];
-      var tileX = floor(nx);
-      var tileY = floor(ny);
-      if (nx > 1 && nx < MAPSIZE-1 && ny > 1 && ny < MAPSIZE-1 && map2[tileY][tileX] !== 1) {
-        npc.x = nx;
-        npc.y = ny;
-      } else {
-        npc.walkAngle += PI;
-      }
-    }
-    if (npc.walkTimer > 180) npc.walkTimer = 0;
-  }
-}
-
-function verificarInteracao2D() {
-  for (var i = 0; i < activeNPCs.length; i++) {
-    var npc = activeNPCs[i];
-    if (dist(player.x, player.y, npc.x, npc.y) < 2.4) {
-      dialogActive = true;
-      dialogNPC = npc;
-      dialogLine = 0;
-      npc.talking = true;
-      playDialog();
-      return;
-    }
-  }
-  for (var i = 0; i < spots.length; i++) {
-    var sp = spots[i];
-    if (!sp.done && dist(player.x, player.y, sp.x, sp.y) < 1.8) {
-      sp.done = true;
-      objDone++;
-      pickupAnim = 45;
-      playPickup();
-      if (objDone >= objTotal) {
-        phaseWin = true;
-        if (currentPhase < 5) phasesUnlocked[currentPhase + 1] = true;
-        saveProgress();
-      }
-      return;
-    }
-  }
-}
-
-function renderizarCena2D() {
-  var map2 = MAPS[currentPhase];
-  cameraX2 = player.x * TAMANHO_CELULA - width/2 + TAMANHO_CELULA/2;
-  cameraY2 = player.y * TAMANHO_CELULA - height/2 + TAMANHO_CELULA/2;
-  cameraX2 = constrain(cameraX2, 0, MAPSIZE * TAMANHO_CELULA - width);
-  cameraY2 = constrain(cameraY2, 0, MAPSIZE * TAMANHO_CELULA - height);
-  push();
-  translate(-cameraX2, -cameraY2);
-  for (var y = 0; y < MAPSIZE; y++) {
-    for (var x = 0; x < MAPSIZE; x++) {
-      var tile = map2[y][x];
-      var xp = x * TAMANHO_CELULA;
-      var yp = y * TAMANHO_CELULA;
-      if (tile === 1) { // parede
-        fill(101, 67, 33); rect(xp, yp, TAMANHO_CELULA, TAMANHO_CELULA);
-        fill(139, 90, 43); rect(xp + 4, yp + 4, TAMANHO_CELULA - 8, TAMANHO_CELULA - 8);
-      } else if (tile === 2) { // árvore
-        fill(101, 67, 33); rect(xp + 10, yp + 14, 8, 14);
-        fill(34, 139, 34); ellipse(xp + 14, yp + 10, 18, 18);
-      } else if (tile === 3) { // celeiro
-        fill(160, 80, 40); rect(xp, yp, TAMANHO_CELULA, TAMANHO_CELULA);
-        fill(200, 120, 60); rect(xp + 4, yp + 4, TAMANHO_CELULA - 8, TAMANHO_CELULA - 8);
-      } else if (tile === 4) { // milho
-        fill(80, 140, 40); rect(xp + 12, yp + 14, 4, 14);
-        fill(60, 120, 35); ellipse(xp + 14, yp + 10, 10, 12);
-      } else if (tile === 5) { // pedra
-        fill(120, 110, 100); ellipse(xp + 14, yp + 18, 18, 12);
-      } else { // chão
-        var cor = 90 + (x * 3 + y * 2) % 40;
-        fill(cor, cor - 20, cor - 50); rect(xp, yp, TAMANHO_CELULA, TAMANHO_CELULA);
-        fill(70, 50, 30, 80); ellipse(xp + 14, yp + 20, 10, 6);
-      }
-    }
-  }
-  for (var i = 0; i < spots.length; i++) {
-    if (!spots[i].done) {
-      var xp = spots[i].x * TAMANHO_CELULA;
-      var yp = spots[i].y * TAMANHO_CELULA;
-      var pulse = 150 + sin(frameCount * 0.1) * 105;
-      fill(255, 100, 100, pulse); ellipse(xp + 14, yp + 14, 24, 24);
-      fill(255, 50, 50); ellipse(xp + 14, yp + 14, 16, 16);
-      fill(255); textSize(16); text('⭐', xp + 14, yp + 14);
-    }
-  }
-  for (var i = 0; i < activeNPCs.length; i++) {
-    var npc = activeNPCs[i];
-    var ch = CHARS[npc.charIdx];
-    var xp = npc.x * TAMANHO_CELULA;
-    var yp = npc.y * TAMANHO_CELULA;
-    fill(ch.shirtR, ch.shirtG, ch.shirtB); rect(xp + 5, yp + 10, 18, 18, 3);
-    fill(ch.skinR, ch.skinG, ch.skinB); ellipse(xp + 14, yp + 8, 14, 14);
-    if (ch.hat) { fill(ch.shirtR * 0.6, ch.shirtG * 0.6, ch.shirtB * 0.6); rect(xp + 7, yp + 2, 14, 5, 2); }
-    fill(0); ellipse(xp + 10, yp + 7, 2, 2); ellipse(xp + 18, yp + 7, 2, 2);
-    fill(255, 255, 200); textSize(7); text(ch.name, xp + 14, yp - 2);
-  }
-  var xp = player.x * TAMANHO_CELULA;
-  var yp = player.y * TAMANHO_CELULA;
-  fill(60, 120, 60); rect(xp + 5, yp + 10, 18, 18, 3);
-  fill(255, 200, 150); ellipse(xp + 14, yp + 8, 14, 14);
-  fill(101, 67, 33); rect(xp + 7, yp + 2, 14, 5, 2);
-  fill(0); ellipse(xp + 10, yp + 7, 2, 2); ellipse(xp + 18, yp + 7, 2, 2);
-  var ang = player.angle;
-  var dx = cos(ang) * 10, dy = sin(ang) * 10;
-  fill(255, 200, 100);
-  triangle(xp + 14 + dx, yp + 14 + dy,
-           xp + 14 + dx * 0.3 + 4, yp + 14 + dy * 0.3,
-           xp + 14 + dx * 0.3 - 4, yp + 14 + dy * 0.3);
-  pop();
-}
-
-function desenharMiniMapa() {
-  var map2 = MAPS[currentPhase];
-  var miniSize = 90;
-  var cellSize = miniSize / 9;
-  var offsetX = width - miniSize - 10;
-  var offsetY = 55;
-  fill(0, 180); rect(offsetX - 2, offsetY - 2, miniSize + 4, miniSize + 4, 5);
-  var startX = max(0, min(MAPSIZE - 9, floor(player.x) - 4));
-  var startY = max(0, min(MAPSIZE - 9, floor(player.y) - 4));
-  for (var i = 0; i < 9; i++) {
-    for (var j = 0; j < 9; j++) {
-      var mapX = startX + j, mapY = startY + i;
-      if (mapX < MAPSIZE && mapY < MAPSIZE) {
-        var tile = map2[mapY][mapX];
-        var cor = (tile === 1) ? color(80, 70, 50) : color(100, 80, 50);
-        fill(cor);
-        rect(offsetX + j * cellSize, offsetY + i * cellSize, cellSize, cellSize);
-      }
-    }
-  }
-  var px = offsetX + ((player.x - startX) * cellSize);
-  var py = offsetY + ((player.y - startY) * cellSize);
-  fill(255, 255, 100); ellipse(px, py, cellSize * 0.8, cellSize * 0.8);
-}
-
-function desenharBracos2D() {
-  var pd = PHASE_DATA[currentPhase];
-  fill(0, 180); rect(width - 150, height - 50, 140, 40, 8);
-  fill(255, 200, 80); textSize(11); text(pd.tool, width - 140, height - 30);
-  fill(200); textSize(9); text('[E] Interagir', width - 140, height - 18);
-  if (!pointerLocked && campaignState === 'gameplay') {
-    fill(0, 140); rect(width / 2 - 105, height - 45, 210, 20, 4);
-    fill(255, 200, 80); textSize(9); text('CLIQUE para travar a câmera', width / 2, height - 35);
-  }
-}
-
-function desenharHUD2D() {
-  var pd = PHASE_DATA[currentPhase];
-  fill(0, 195); rect(0, 0, width, 48);
-  fill(175, 248, 140); textSize(12); text(pd.name + ' — ' + pd.subtitle, 14, 20);
-  fill(135, 200, 105); textSize(9); text(pd.toolTip + ' | WASD mover | E interagir', 14, 35);
-  var prog = objDone / max(objTotal, 1);
-  fill(0, 100); rect(width / 2 - 85, 10, 170, 28, 4);
-  fill(28, 100, 22); rect(width / 2 - 83, 12, 166 * prog, 24, 3);
-  fill(195, 255, 165); textSize(11); text(pd.objLabel + ': ' + objDone + ' / ' + objTotal, width / 2, 28);
-  if (phaseTimer > 0) {
-    var secs = ceil(phaseTimer / 60);
-    fill(255, 220, 80); textSize(14); text('⏱ ' + floor(secs / 60) + ':' + nf(secs % 60, 2), width - 14, 24);
-  }
-  var cx = width / 2, cy = height / 2;
-  stroke(255, 255, 255, 200); strokeWeight(1.5);
-  line(cx - 10, cy, cx - 4, cy); line(cx + 4, cy, cx + 10, cy);
-  line(cx, cy - 10, cx, cy - 4); line(cx, cy + 4, cx, cy + 10);
-  noStroke();
-  fill(0, 120); rect(width - 124, 52, 110, 13, 3);
-  fill(player.running ? color(255, 175, 0) : color(65, 195, 65)); rect(width - 122, 54, player.stamina, 9, 2);
-  fill(195, 200, 175); textSize(9); text('STAMINA', width - 14, 58);
-  fill(0, 160); rect(0, height - 26, width, 26);
-  fill(145, 195, 115); textSize(8); text('WASD/Setas mover | E interagir | ESC pausar', 14, height - 13);
 }
