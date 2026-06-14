@@ -1,7 +1,28 @@
-html, body {
+* {
   margin: 0;
   padding: 0;
+  box-sizing: border-box;
 }
+
+body {
+  background: linear-gradient(135deg, #0a2f0a 0%, #1a4a1a 100%);
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  font-family: 'Courier New', monospace;
+}
+
+main {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 20px;
+}
+
 canvas {
+  border-radius: 12px;
+  box-shadow: 0 0 30px rgba(0,0,0,0.5);
   display: block;
+  margin: 0 auto;
 }
